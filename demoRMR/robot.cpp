@@ -1,8 +1,19 @@
 #include "robot.h"
 #include <cmath>
+// #include <iostream>
+#include <string>
 
 robot::robot(QObject *parent) : QObject(parent)
 {
+    x = 0.0;
+    y = 0.0;
+    fi = 0.0;
+
+    targetX = 0.0;
+    targetY = 0.0;
+    hasTarget = false;
+
+    datacounter = 0;
     qRegisterMetaType<LaserMeasurement>("LaserMeasurement");
     #ifndef DISABLE_OPENCV
     qRegisterMetaType<cv::Mat>("cv::Mat");
@@ -17,6 +28,7 @@ void robot::initAndStartRobot(std::string ipaddress)
 
     forwardspeed=0;
     rotationspeed=0;
+    setTarget(0.5, 0.7);
     ///setovanie veci na komunikaciu s robotom/lidarom/kamerou.. su tam adresa porty a callback.. laser ma ze sa da dat callback aj ako lambda.
     /// lambdy su super, setria miesto a ak su rozumnej dlzky,tak aj prehladnost... ak ste o nich nic nepoculi poradte sa s vasim doktorom alebo lekarnikom...
     robotCom.setLaserParameters([this](const std::vector<LaserData>& dat)->int{return processThisLidar(dat);},ipaddress);
@@ -31,6 +43,13 @@ void robot::initAndStartRobot(std::string ipaddress)
     robotCom.robotStart();
 
 
+}
+
+void robot::setTarget(double tx, double ty)
+{
+    targetX = tx;
+    targetY = ty;
+    hasTarget = true;
 }
 
 void robot::setSpeedVal(double forw, double rots)
@@ -72,12 +91,11 @@ int robot::processThisRobot(const TKobukiData &robotdata)
     prevEncoderLeft = robotdata.EncoderLeft;
     prevEncoderRight = robotdata.EncoderRight;
 
-    double wheelRadius = 35.0;
-    double wheelBase   = 230.0;
-    double ticksPerRev = 4096.0;
+    double tickToMeter = 0.000085292090497737556558;
+    double wheelBase = 0.23;
 
-    double dL = 2.0 * M_PI * wheelRadius * (deltaL / ticksPerRev);
-    double dR = 2.0 * M_PI * wheelRadius * (deltaR / ticksPerRev);
+    double dL = tickToMeter * deltaL;
+    double dR = tickToMeter * deltaR;
 
     double fi_old = fi;
 
@@ -98,7 +116,39 @@ int robot::processThisRobot(const TKobukiData &robotdata)
         y += dS * sin(fi_old);
     }
 
-    emit publishPosition(x, y, fi);
+    if(datacounter % 5 == 0)
+    {
+        emit publishPosition(x, y, fi);
+    }
+    //std::cout << x << " " << y << " " << fi << std::endl;
+
+    if(hasTarget)
+    {
+        double dx = targetX - x;
+        double dy = targetY - y;
+
+        double distance = sqrt(dx*dx + dy*dy);
+        double targetAngle = atan2(dy, dx);
+        double angleError = targetAngle - fi;
+
+        while(angleError > M_PI)  angleError -= 2*M_PI;
+        while(angleError < -M_PI) angleError += 2*M_PI;
+
+        if(distance < 0.05)
+        {
+            setSpeed(0,0);
+            hasTarget = false;
+        }
+        else
+        {
+            double v = 150 * distance;
+            if(v > 250) v = 250;
+
+            double w = 1.0 * angleError;
+
+            setSpeed(v, w);
+        }
+    }
 
     ///---tu sa posielaju rychlosti do robota... vklude zakomentujte ak si chcete spravit svoje
     if(useDirectCommands==0)

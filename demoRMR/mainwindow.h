@@ -81,6 +81,7 @@ private:
 #endif
 public slots:
   void setUiValues(double robotX, double robotY, double robotFi);
+    //goalX,goalY
 };
 
 #endif // MAINWINDOW_H

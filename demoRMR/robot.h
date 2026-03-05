@@ -25,6 +25,7 @@ public:
   explicit robot(QObject *parent = nullptr);
 
   void initAndStartRobot(std::string ipaddress);
+  void setTarget(double tx, double ty);
 
   // tato funkcia len nastavuje hodnoty.. posielaju sa v callbacku(dobre, kvoli
   // asynchronnosti a zabezpeceniu,ze sa poslu len raz pri viacero prepisoch
@@ -49,6 +50,10 @@ private:
 
   int prevEncoderLeft;
   int prevEncoderRight;
+
+  double targetX;
+  double targetY;
+  bool hasTarget;
   ///-----------------------------
   /// toto su rychlosti ktore sa nastavuju setSpeedVal a posielaju v
   /// processThisRobot
