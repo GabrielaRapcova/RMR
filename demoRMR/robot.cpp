@@ -140,7 +140,7 @@ int robot::processThisRobot(const TKobukiData &robotdata)
         while(angleError > M_PI)  angleError -= 2*M_PI;
         while(angleError < -M_PI) angleError += 2*M_PI;
 
-        if(distance < 0.05)
+        if(distance < 0.01)
         {
             setSpeed(0,0);
             hasTarget = false;
@@ -156,8 +156,22 @@ int robot::processThisRobot(const TKobukiData &robotdata)
         }
         else
         {
-            double v_target = 150 * distance;
-            if(v_target > 250) v_target = 250;
+            double v_max = 250;
+            double v_min = 50;
+            double slowDownDist = 0.05;
+
+            double v_target;
+
+            if(distance > slowDownDist)
+            {
+                v_target = v_max;
+            }
+            else
+            {
+                v_target = v_min + (v_max - v_min) * (distance / slowDownDist);
+            }
+
+            if(v_target < v_min) v_target = v_min;
 
             double acc = 10;
 
