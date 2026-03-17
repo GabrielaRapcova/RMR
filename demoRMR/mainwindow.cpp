@@ -17,7 +17,7 @@ MainWindow::MainWindow(QWidget *parent) :
 {
 
     //tu je napevno nastavena ip. treba zmenit na to co ste si zadali do text boxu alebo nejaku inu pevnu. co bude spravna
-    ipaddress="127.0.0.1";//192.168.1.11toto je na niektory realny robot.. na lokal budete davat "127.0.0.1"
+    ipaddress="192.168.1.12";//192.168.1.11toto je na niektory realny robot.. na lokal budete davat "127.0.0.1"
 
     ui->setupUi(this);
     datacounter=0;
@@ -110,7 +110,6 @@ void  MainWindow::setUiValues(double robotX,double robotY,double robotFi)
     ui->lineEdit_4->setText(QString::number(robotFi));
 }
 
-
 void MainWindow::on_pushButton_9_clicked() //start button
 {
     //ziskanie joystickov
@@ -178,6 +177,14 @@ void MainWindow::on_pushButton_4_clicked() //stop
 
 }
 
+void MainWindow::on_pushButton_10_clicked() //stop
+{
+    double targetX = ui->lineEdit_5->text().toDouble();
+    double targetY = ui->lineEdit_6->text().toDouble();
+
+    _robot.setTarget(targetX, targetY);
+
+}
 
 
 

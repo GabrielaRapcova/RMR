@@ -12,6 +12,7 @@ robot::robot(QObject *parent) : QObject(parent)
     targetX = 0.0;
     targetY = 0.0;
     hasTarget = false;
+    v_actual = 0;
 
     datacounter = 0;
     qRegisterMetaType<LaserMeasurement>("LaserMeasurement");
@@ -28,7 +29,6 @@ void robot::initAndStartRobot(std::string ipaddress)
 
     forwardspeed=0;
     rotationspeed=0;
-    setTarget(0.5, 0.7);
     ///setovanie veci na komunikaciu s robotom/lidarom/kamerou.. su tam adresa porty a callback.. laser ma ze sa da dat callback aj ako lambda.
     /// lambdy su super, setria miesto a ak su rozumnej dlzky,tak aj prehladnost... ak ste o nich nic nepoculi poradte sa s vasim doktorom alebo lekarnikom...
     robotCom.setLaserParameters([this](const std::vector<LaserData>& dat)->int{return processThisLidar(dat);},ipaddress);
@@ -45,10 +45,10 @@ void robot::initAndStartRobot(std::string ipaddress)
 
 }
 
-void robot::setTarget(double tx, double ty)
+void robot::setTarget(double x, double y)
 {
-    targetX = tx;
-    targetY = ty;
+    targetX = x;
+    targetY = y;
     hasTarget = true;
 }
 
@@ -87,6 +87,12 @@ int robot::processThisRobot(const TKobukiData &robotdata)
 
     int deltaL = robotdata.EncoderLeft - prevEncoderLeft;
     int deltaR = robotdata.EncoderRight - prevEncoderRight;
+
+    if(deltaL > 32768) deltaL -= 65536;
+    if(deltaL < -32768) deltaL += 65536;
+
+    if(deltaR > 32768) deltaR -= 65536;
+    if(deltaR < -32768) deltaR += 65536;
 
     prevEncoderLeft = robotdata.EncoderLeft;
     prevEncoderRight = robotdata.EncoderRight;
@@ -138,15 +144,35 @@ int robot::processThisRobot(const TKobukiData &robotdata)
         {
             setSpeed(0,0);
             hasTarget = false;
+            v_actual = 0;
+        }
+        else if(fabs(angleError) > 0.2)
+        {
+            double w = 1.5 * angleError;
+            if(w > 2.0) w = 2.0;
+            if(w < -2.0) w = -2.0;
+
+            setSpeed(0, w);
         }
         else
         {
-            double v = 150 * distance;
-            if(v > 250) v = 250;
+            double v_target = 150 * distance;
+            if(v_target > 250) v_target = 250;
 
-            double w = 1.0 * angleError;
+            double acc = 10;
 
-            setSpeed(v, w);
+            if(v_actual < v_target)
+            {
+                v_actual += acc;
+                if(v_actual > v_target) v_actual = v_target;
+            }
+            else if(v_actual > v_target)
+            {
+                v_actual -= acc;
+                if(v_actual < v_target) v_actual = v_target;
+            }
+
+            setSpeed(v_actual, 0);
         }
     }
 
