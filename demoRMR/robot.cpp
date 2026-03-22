@@ -13,8 +13,10 @@ robot::robot(QObject *parent) : QObject(parent)
     targetY = 0.0;
     hasTarget = false;
     v_actual = 0;
+    w_actual = 0.0;
 
     datacounter = 0;
+    rotateMode = false;
     qRegisterMetaType<LaserMeasurement>("LaserMeasurement");
     #ifndef DISABLE_OPENCV
     qRegisterMetaType<cv::Mat>("cv::Mat");
@@ -50,6 +52,8 @@ void robot::setTarget(double x, double y)
     targetX = x;
     targetY = y;
     hasTarget = true;
+    rotateMode = true;
+    w_actual = 0.0;
 }
 
 void robot::setSpeedVal(double forw, double rots)
@@ -81,7 +85,7 @@ int robot::processThisRobot(const TKobukiData &robotdata)
         prevEncoderLeft = robotdata.EncoderLeft;
         prevEncoderRight = robotdata.EncoderRight;
 
-        datacounter ++;
+        datacounter++;
         return 0;
     }
 
@@ -110,14 +114,12 @@ int robot::processThisRobot(const TKobukiData &robotdata)
     if(fabs(dR - dL) > 0.0001)
     {
         double R = (wheelBase * (dR + dL)) / (2.0 * (dR - dL));
-
         x += R * (sin(fi) - sin(fi_old));
         y -= R * (cos(fi) - cos(fi_old));
     }
     else
     {
         double dS = (dR + dL) / 2.0;
-
         x += dS * cos(fi_old);
         y += dS * sin(fi_old);
     }
@@ -126,7 +128,6 @@ int robot::processThisRobot(const TKobukiData &robotdata)
     {
         emit publishPosition(x, y, fi);
     }
-    //std::cout << x << " " << y << " " << fi << std::endl;
 
     if(hasTarget)
     {
@@ -137,75 +138,129 @@ int robot::processThisRobot(const TKobukiData &robotdata)
         double targetAngle = atan2(dy, dx);
         double angleError = targetAngle - fi;
 
-        while(angleError > M_PI)  angleError -= 2*M_PI;
-        while(angleError < -M_PI) angleError += 2*M_PI;
+        while(angleError > M_PI)  angleError -= 2.0 * M_PI;
+        while(angleError < -M_PI) angleError += 2.0 * M_PI;
+
+        double v_target = 0.0;
+        double w_target = 0.0;
+
 
         if(distance < 0.01)
         {
-            setSpeed(0,0);
             hasTarget = false;
-            v_actual = 0;
-        }
-        else if(fabs(angleError) > 0.2)
-        {
-            double w = 1.5 * angleError;
-            if(w > 2.0) w = 2.0;
-            if(w < -2.0) w = -2.0;
-
-            setSpeed(0, w);
+            rotateMode = false;
+            v_target = 0.0;
+            w_target = 0.0;
         }
         else
         {
-            double v_max = 250;
-            double v_min = 50;
-            double slowDownDist = 0.05;
+            double enterRot = 0.20;
+            double exitRot  = 0.10;
 
-            double v_target;
-
-            if(distance > slowDownDist)
+            if(rotateMode)
             {
-                v_target = v_max;
+                if(fabs(angleError) < exitRot)
+                    rotateMode = false;
             }
             else
             {
-                v_target = v_min + (v_max - v_min) * (distance / slowDownDist);
+                if(fabs(angleError) > enterRot)
+                    rotateMode = true;
             }
 
-            if(v_target < v_min) v_target = v_min;
-
-            double acc = 10;
-
-            if(v_actual < v_target)
+            if(rotateMode)
             {
-                v_actual += acc;
-                if(v_actual > v_target) v_actual = v_target;
-            }
-            else if(v_actual > v_target)
-            {
-                v_actual -= acc;
-                if(v_actual < v_target) v_actual = v_target;
-            }
 
-            setSpeed(v_actual, 0);
+                v_target = 0.0;
+                w_target = 1.2 * angleError;
+
+                if(w_target > 1.2)  w_target = 1.2;
+                if(w_target < -1.2) w_target = -1.2;
+            }
+            else
+            {
+
+                double v_max = 180.0;
+                double v_min = 15.0;
+                double slowDownDist = 0.15;
+
+                if(distance > slowDownDist)
+                {
+                    v_target = v_max;
+                }
+                else
+                {
+                    v_target = v_min + (v_max - v_min) * (distance / slowDownDist);
+                }
+
+                if(v_target < v_min) v_target = v_min;
+                if(v_target > v_max) v_target = v_max;
+
+
+                double angleScale = cos(angleError);
+                if(angleScale < 0.0) angleScale = 0.0;
+                v_target *= angleScale;
+
+
+                w_target = 0.8 * angleError;
+                if(w_target > 0.5)  w_target = 0.5;
+                if(w_target < -0.5) w_target = -0.5;
+            }
+        }
+
+        // rampa translácie
+        double acc_v = 6.0;
+        if(v_actual < v_target)
+        {
+            v_actual += acc_v;
+            if(v_actual > v_target) v_actual = v_target;
+        }
+        else if(v_actual > v_target)
+        {
+            v_actual -= acc_v;
+            if(v_actual < v_target) v_actual = v_target;
+        }
+
+        // rampa rotácie
+        double acc_w = 0.05;
+        if(w_actual < w_target)
+        {
+            w_actual += acc_w;
+            if(w_actual > w_target) w_actual = w_target;
+        }
+        else if(w_actual > w_target)
+        {
+            w_actual -= acc_w;
+            if(w_actual < w_target) w_actual = w_target;
+        }
+
+
+        if(!hasTarget && fabs(v_actual) < 0.01 && fabs(w_actual) < 0.01)
+        {
+            v_actual = 0.0;
+            w_actual = 0.0;
+            setSpeed(0, 0);
+        }
+        else
+        {
+            setSpeed(v_actual, w_actual);
         }
     }
 
-    ///---tu sa posielaju rychlosti do robota... vklude zakomentujte ak si chcete spravit svoje
-    if(useDirectCommands==0)
+    if(useDirectCommands == 0)
     {
-        if(forwardspeed==0 && rotationspeed!=0)
+        if(forwardspeed == 0 && rotationspeed != 0)
             robotCom.setRotationSpeed(rotationspeed);
-        else if(forwardspeed!=0 && rotationspeed==0)
+        else if(forwardspeed != 0 && rotationspeed == 0)
             robotCom.setTranslationSpeed(forwardspeed);
-        else if((forwardspeed!=0 && rotationspeed!=0))
-            robotCom.setArcSpeed(forwardspeed,forwardspeed/rotationspeed);
+        else if((forwardspeed != 0 && rotationspeed != 0))
+            robotCom.setArcSpeed(forwardspeed, forwardspeed / rotationspeed);
         else
             robotCom.setTranslationSpeed(0);
     }
+
     datacounter++;
-
     return 0;
-
 }
 
 ///toto je calback na data z lidaru, ktory ste podhodili robotu vo funkcii initAndStartRobot

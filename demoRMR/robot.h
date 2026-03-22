@@ -52,9 +52,11 @@ private:
   int prevEncoderRight;
   double v_actual;
 
+  bool rotateMode;
   double targetX;
   double targetY;
   bool hasTarget;
+  double w_actual;
   ///-----------------------------
   /// toto su rychlosti ktore sa nastavuju setSpeedVal a posielaju v
   /// processThisRobot
