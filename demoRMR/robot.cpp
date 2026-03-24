@@ -2,6 +2,7 @@
 #include <cmath>
 // #include <iostream>
 #include <string>
+#include <vector>
 
 robot::robot(QObject *parent) : QObject(parent)
 {
@@ -17,6 +18,12 @@ robot::robot(QObject *parent) : QObject(parent)
 
     datacounter = 0;
     rotateMode = false;
+    gyroOffset = 0.0;
+    gyroInitialized = false;
+    sectorCount = 36;
+    sectorWidthDeg = 360.0 / sectorCount;
+    sectors.resize(sectorCount, 0);
+    obstacleMaxDist = 1.5;
     qRegisterMetaType<LaserMeasurement>("LaserMeasurement");
     #ifndef DISABLE_OPENCV
     qRegisterMetaType<cv::Mat>("cv::Mat");
@@ -54,6 +61,7 @@ void robot::setTarget(double x, double y)
     hasTarget = true;
     rotateMode = true;
     w_actual = 0.0;
+    v_actual = 0.0;
 }
 
 void robot::setSpeedVal(double forw, double rots)
@@ -88,6 +96,11 @@ int robot::processThisRobot(const TKobukiData &robotdata)
         datacounter++;
         return 0;
     }
+    if(!gyroInitialized)
+    {
+        gyroOffset = robotdata.GyroAngle;
+        gyroInitialized = true;
+    }
 
     int deltaL = robotdata.EncoderLeft - prevEncoderLeft;
     int deltaR = robotdata.EncoderRight - prevEncoderRight;
@@ -108,8 +121,7 @@ int robot::processThisRobot(const TKobukiData &robotdata)
     double dR = tickToMeter * deltaR;
 
     double fi_old = fi;
-
-    fi = (robotdata.GyroAngle / 100.0) * M_PI / 180.0;
+    fi = ((robotdata.GyroAngle - gyroOffset) / 100.0) * M_PI / 180.0;
 
     if(fabs(dR - dL) > 0.0001)
     {
@@ -151,6 +163,8 @@ int robot::processThisRobot(const TKobukiData &robotdata)
             rotateMode = false;
             v_target = 0.0;
             w_target = 0.0;
+            v_actual = 0.0;
+            w_actual = 0.0;
         }
         else
         {
@@ -180,9 +194,9 @@ int robot::processThisRobot(const TKobukiData &robotdata)
             else
             {
 
-                double v_max = 180.0;
-                double v_min = 15.0;
-                double slowDownDist = 0.15;
+                double v_max = 250.0;
+                double v_min = 20.0;
+                double slowDownDist = 0.2;
 
                 if(distance > slowDownDist)
                 {
@@ -197,9 +211,9 @@ int robot::processThisRobot(const TKobukiData &robotdata)
                 if(v_target > v_max) v_target = v_max;
 
 
-                double angleScale = cos(angleError);
+                /*double angleScale = cos(angleError);
                 if(angleScale < 0.0) angleScale = 0.0;
-                v_target *= angleScale;
+                v_target *= angleScale;*/
 
 
                 w_target = 0.8 * angleError;
@@ -208,8 +222,8 @@ int robot::processThisRobot(const TKobukiData &robotdata)
             }
         }
 
-        // rampa translácie
-        double acc_v = 6.0;
+        double acc_v = 8.0;
+        double acc_v2 = 15.0;
         if(v_actual < v_target)
         {
             v_actual += acc_v;
@@ -217,11 +231,10 @@ int robot::processThisRobot(const TKobukiData &robotdata)
         }
         else if(v_actual > v_target)
         {
-            v_actual -= acc_v;
+            v_actual -= acc_v2;
             if(v_actual < v_target) v_actual = v_target;
         }
 
-        // rampa rotácie
         double acc_w = 0.05;
         if(w_actual < w_target)
         {
@@ -237,8 +250,6 @@ int robot::processThisRobot(const TKobukiData &robotdata)
 
         if(!hasTarget && fabs(v_actual) < 0.01 && fabs(w_actual) < 0.01)
         {
-            v_actual = 0.0;
-            w_actual = 0.0;
             setSpeed(0, 0);
         }
         else
@@ -273,6 +284,27 @@ int robot::processThisLidar(const std::vector<LaserData>& laserData)
     //tu mozete robit s datami z lidaru.. napriklad najst prekazky, zapisat do mapy. naplanovat ako sa prekazke vyhnut.
     // ale nic vypoctovo narocne - to iste vlakno ktore cita data z lidaru
    // updateLaserPicture=1;
+    sectors.assign(sectorCount, 0);
+   /* for (const auto& point : laserData)
+    {
+        double angleDeg = point.scanAngle;
+        double distance = point.scanDistance;
+
+        if (distance <= 0.0 || distance > obstacleMaxDist)
+            continue;
+
+        // angleDeg = -angleDeg;
+
+        while (angleDeg >= 180.0) angleDeg -= 360.0;
+        while (angleDeg < -180.0) angleDeg += 360.0;
+
+        int index = static_cast<int>((angleDeg + 180.0) / sectorWidthDeg);
+
+        if (index < 0) index = 0;
+        if (index >= sectorCount) index = sectorCount - 1;
+
+        sectors[index] = 1;
+    }*/
     emit publishLidar(copyOfLaserData);
    // update();//tento prikaz prinuti prekreslit obrazovku.. zavola sa paintEvent funkcia
 

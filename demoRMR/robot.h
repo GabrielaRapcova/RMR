@@ -3,6 +3,7 @@
 #include "librobot/librobot.h"
 #include <QObject>
 #include <QWidget>
+#include <vector>
 
 #ifndef DISABLE_OPENCV
 #include "opencv2/core/utility.hpp"
@@ -43,15 +44,21 @@ signals:
   void publishSkeleton(const skeleton &skeledata);
 #endif
 private:
+  std::vector<int> sectors;
+  int sectorCount;
+  double sectorWidthDeg;
+  double obstacleMaxDist;
   /// toto su vase premenne na vasu odometriu
   double x;
   double y;
   double fi;
-
+  double fi_old;
   int prevEncoderLeft;
   int prevEncoderRight;
   double v_actual;
 
+  double gyroOffset;
+  bool gyroInitialized;
   bool rotateMode;
   double targetX;
   double targetY;
