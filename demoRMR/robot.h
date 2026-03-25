@@ -72,6 +72,9 @@ private:
 
   /// toto su callbacky co sa sa volaju s novymi datami
   int processThisLidar(const std::vector<LaserData> &laserData);
+  std::vector<std::pair<int,int>> freeGaps;
+  std::vector<double> candidateDirections;
+  double bestDirectionDeg;
   int processThisRobot(const TKobukiData &robotdata);
 #ifndef DISABLE_OPENCV
   int processThisCamera(cv::Mat cameraData);

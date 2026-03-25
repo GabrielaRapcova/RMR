@@ -24,6 +24,7 @@ robot::robot(QObject *parent) : QObject(parent)
     sectorWidthDeg = 360.0 / sectorCount;
     sectors.resize(sectorCount, 0);
     obstacleMaxDist = 1.5;
+    bestDirectionDeg = 0.0;
     qRegisterMetaType<LaserMeasurement>("LaserMeasurement");
     #ifndef DISABLE_OPENCV
     qRegisterMetaType<cv::Mat>("cv::Mat");
@@ -92,14 +93,9 @@ int robot::processThisRobot(const TKobukiData &robotdata)
     {
         prevEncoderLeft = robotdata.EncoderLeft;
         prevEncoderRight = robotdata.EncoderRight;
-
+        gyroOffset = robotdata.GyroAngle;
         datacounter++;
         return 0;
-    }
-    if(!gyroInitialized)
-    {
-        gyroOffset = robotdata.GyroAngle;
-        gyroInitialized = true;
     }
 
     int deltaL = robotdata.EncoderLeft - prevEncoderLeft;
@@ -120,21 +116,12 @@ int robot::processThisRobot(const TKobukiData &robotdata)
     double dL = tickToMeter * deltaL;
     double dR = tickToMeter * deltaR;
 
-    double fi_old = fi;
     fi = ((robotdata.GyroAngle - gyroOffset) / 100.0) * M_PI / 180.0;
 
-    if(fabs(dR - dL) > 0.0001)
-    {
-        double R = (wheelBase * (dR + dL)) / (2.0 * (dR - dL));
-        x += R * (sin(fi) - sin(fi_old));
-        y -= R * (cos(fi) - cos(fi_old));
-    }
-    else
-    {
-        double dS = (dR + dL) / 2.0;
-        x += dS * cos(fi_old);
-        y += dS * sin(fi_old);
-    }
+    double dS = (dR + dL) / 2.0;
+    x += dS * cos(fi);
+    y += dS * sin(fi);
+
 
     if(datacounter % 5 == 0)
     {
@@ -150,8 +137,8 @@ int robot::processThisRobot(const TKobukiData &robotdata)
         double targetAngle = atan2(dy, dx);
         double angleError = targetAngle - fi;
 
-        while(angleError > M_PI)  angleError -= 2.0 * M_PI;
-        while(angleError < -M_PI) angleError += 2.0 * M_PI;
+        if(angleError > M_PI)  angleError -= 2.0 * M_PI;
+        if(angleError < -M_PI) angleError += 2.0 * M_PI;
 
         double v_target = 0.0;
         double w_target = 0.0;
@@ -186,10 +173,10 @@ int robot::processThisRobot(const TKobukiData &robotdata)
             {
 
                 v_target = 0.0;
-                w_target = 1.2 * angleError;
+                w_target = 0.8 * angleError;
 
-                if(w_target > 1.2)  w_target = 1.2;
-                if(w_target < -1.2) w_target = -1.2;
+                if(w_target > 0.5)  w_target = 0.5;
+                if(w_target < 0.5) w_target = 0.5;
             }
             else
             {
@@ -285,7 +272,7 @@ int robot::processThisLidar(const std::vector<LaserData>& laserData)
     // ale nic vypoctovo narocne - to iste vlakno ktore cita data z lidaru
    // updateLaserPicture=1;
     sectors.assign(sectorCount, 0);
-   /* for (const auto& point : laserData)
+     for (const auto& point : laserData)
     {
         double angleDeg = point.scanAngle;
         double distance = point.scanDistance;
@@ -304,7 +291,7 @@ int robot::processThisLidar(const std::vector<LaserData>& laserData)
         if (index >= sectorCount) index = sectorCount - 1;
 
         sectors[index] = 1;
-    }*/
+    }
     emit publishLidar(copyOfLaserData);
    // update();//tento prikaz prinuti prekreslit obrazovku.. zavola sa paintEvent funkcia
 
