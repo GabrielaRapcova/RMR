@@ -17,9 +17,11 @@ MainWindow::MainWindow(QWidget *parent) :
 {
 
     //tu je napevno nastavena ip. treba zmenit na to co ste si zadali do text boxu alebo nejaku inu pevnu. co bude spravna
-    ipaddress="192.168.1.11";//192.168.1.11toto je na niektory realny robot.. na lokal budete davat "127.0.0.1"
+    ipaddress="127.0.0.1";//192.168.1.11toto je na niektory realny robot.. na lokal budete davat "127.0.0.1"
 
     ui->setupUi(this);
+    mapWidget = new MapWidget();
+    mapWidget->show();
     datacounter=0;
 #ifndef DISABLE_OPENCV
     actIndex=-1;
@@ -66,6 +68,16 @@ void MainWindow::paintEvent(QPaintEvent *event)
         {
             updateLaserPicture=0;
 
+            const auto &grid = _robot.getGrid();
+            mapWidget->setGrid(grid);
+
+            int cellSize = 2; // veľkosť bunky mapy
+
+            QPen gridPen;
+            gridPen.setColor(Qt::white);
+            gridPen.setWidth(1);
+
+            painter.setPen(gridPen);
 
             pero.setColor(Qt::red);//farba je zelena
             painter.setPen(pero);

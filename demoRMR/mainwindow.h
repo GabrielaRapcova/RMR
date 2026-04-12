@@ -16,6 +16,7 @@
 // #include "rplidar.h"
 
 #include "robot.h"
+#include "map.h"
 #ifndef DISABLE_JOYSTICK
 #include <QJoysticks.h>
 #endif
@@ -68,6 +69,7 @@ private slots:
 #endif
 private:
   robot _robot;
+  MapWidget *mapWidget;
   //--skuste tu nic nevymazat... pridavajte co chcete, ale pri odoberani by sa
   // mohol stat nejaky drobny problem, co bude vyhadzovat chyby
   Ui::MainWindow *ui;

@@ -28,6 +28,17 @@ public:
   void initAndStartRobot(std::string ipaddress);
   void setTarget(double x, double y);
 
+  //mapping
+  const std::vector<std::vector<int>>& getGrid() const;
+  struct Position
+  {
+      double x;
+      double y;
+      double fi;
+      uint32_t timestamp;
+  };
+  Position interpolatePosition(uint32_t time);
+
   // tato funkcia len nastavuje hodnoty.. posielaju sa v callbacku(dobre, kvoli
   // asynchronnosti a zabezpeceniu,ze sa poslu len raz pri viacero prepisoch
   // vramci callu)
@@ -48,7 +59,8 @@ private:
   int sectorCount;
   double sectorWidthDeg;
   double obstacleMaxDist;
-  /// toto su vase premenne na vasu odometriu
+
+  // odometry
   double x;
   double y;
   double fi;
@@ -69,6 +81,19 @@ private:
   /// processThisRobot
   double forwardspeed;  // mm/s
   double rotationspeed; // omega/s
+
+  // grid for mapping
+  std::vector<std::vector<int>> tempGrid;
+  std::vector<std::vector<int>> grid;
+  std::vector<Position> positionHistory;
+
+  int gridWidth;
+  int gridHeight;
+  double resolution;
+
+  double minDist;
+  double maxDist;
+  void drawLine(int x0,int y0, int x1,int y1);
 
   /// toto su callbacky co sa sa volaju s novymi datami
   int processThisLidar(const std::vector<LaserData> &laserData);

@@ -20,17 +20,43 @@ robot::robot(QObject *parent) : QObject(parent)
     rotateMode = false;
     gyroOffset = 0.0;
     gyroInitialized = false;
+
+    //mapping
+    resolution = 0.05;
+    gridWidth = 14/resolution;
+    gridHeight = 14/resolution;
+
+    grid.resize(gridWidth);
+    for(int i = 0; i < gridWidth; i++)
+    {
+        grid[i].resize(gridHeight);
+    }
+
+    tempGrid.resize(gridWidth);
+    for(int i = 0; i < gridWidth; i++)
+    {
+        tempGrid[i].resize(gridHeight);
+
+        for(int j = 0; j < gridHeight; j++)
+        {
+            tempGrid[i][j] = 0;
+        }
+    }
+    minDist = 0.23;
+    maxDist = 3.0;
+
+    //navigacia
     sectorCount = 36;
     sectorWidthDeg = 360.0 / sectorCount;
     sectors.resize(sectorCount, 0);
     obstacleMaxDist = 1.5;
     bestDirectionDeg = 0.0;
     qRegisterMetaType<LaserMeasurement>("LaserMeasurement");
-    #ifndef DISABLE_OPENCV
+#ifndef DISABLE_OPENCV
     qRegisterMetaType<cv::Mat>("cv::Mat");
 #endif
 #ifndef DISABLE_SKELETON
-qRegisterMetaType<skeleton>("skeleton");
+    qRegisterMetaType<skeleton>("skeleton");
 #endif
 }
 
@@ -43,11 +69,11 @@ void robot::initAndStartRobot(std::string ipaddress)
     /// lambdy su super, setria miesto a ak su rozumnej dlzky,tak aj prehladnost... ak ste o nich nic nepoculi poradte sa s vasim doktorom alebo lekarnikom...
     robotCom.setLaserParameters([this](const std::vector<LaserData>& dat)->int{return processThisLidar(dat);},ipaddress);
     robotCom.setRobotParameters([this](const TKobukiData& dat)->int{return processThisRobot(dat);},ipaddress);
-  #ifndef DISABLE_OPENCV
+#ifndef DISABLE_OPENCV
     robotCom.setCameraParameters(std::bind(&robot::processThisCamera,this,std::placeholders::_1),"http://"+ipaddress+":8000/stream.mjpg");
 #endif
-   #ifndef DISABLE_SKELETON
-      robotCom.setSkeletonParameters(std::bind(&robot::processThisSkeleton,this,std::placeholders::_1));
+#ifndef DISABLE_SKELETON
+    robotCom.setSkeletonParameters(std::bind(&robot::processThisSkeleton,this,std::placeholders::_1));
 #endif
     ///ked je vsetko nasetovane tak to tento prikaz spusti (ak nieco nieje setnute,tak to normalne nenastavi.cize ak napr nechcete kameru,vklude vsetky info o nej vymazte)
     robotCom.robotStart();
@@ -257,8 +283,57 @@ int robot::processThisRobot(const TKobukiData &robotdata)
             robotCom.setTranslationSpeed(0);
     }
 
+    Position p;
+
+    p.x = x;
+    p.y = y;
+    p.fi = fi;
+    p.timestamp = robotdata.timestamp;
+
+    positionHistory.push_back(p);
+    if(positionHistory.size() > 1000)
+    {
+        positionHistory.erase(positionHistory.begin());
+    }
+
     datacounter++;
     return 0;
+}
+
+robot::Position robot::interpolatePosition(uint32_t time)
+{
+    if(positionHistory.size() < 2)
+        return positionHistory.back();
+
+    for(int i=1; i<positionHistory.size(); i++)
+    {
+        if(positionHistory[i].timestamp >= time)
+        {
+            Position p1 = positionHistory[i-1];
+            Position p2 = positionHistory[i];
+
+            double ratio =
+                double(time - p1.timestamp) /
+                double(p2.timestamp - p1.timestamp);
+
+            Position result;
+
+            result.x =
+                p1.x + ratio * (p2.x - p1.x);
+
+            result.y =
+                p1.y + ratio * (p2.y - p1.y);
+
+            result.fi =
+                p1.fi + ratio * (p2.fi - p1.fi);
+
+            result.timestamp = time;
+
+            return result;
+        }
+    }
+
+    return positionHistory.back();
 }
 
 ///toto je calback na data z lidaru, ktory ste podhodili robotu vo funkcii initAndStartRobot
@@ -270,21 +345,52 @@ int robot::processThisLidar(const std::vector<LaserData>& laserData)
 
     //tu mozete robit s datami z lidaru.. napriklad najst prekazky, zapisat do mapy. naplanovat ako sa prekazke vyhnut.
     // ale nic vypoctovo narocne - to iste vlakno ktore cita data z lidaru
-   // updateLaserPicture=1;
+    // updateLaserPicture=1;
     sectors.assign(sectorCount, 0);
-     for (const auto& point : laserData)
+    int robot_i = (x / resolution) + gridWidth / 2;
+    int robot_j = (y / resolution) + gridHeight / 2;
+
+    for (const auto& point : laserData)
     {
         double angleDeg = point.scanAngle;
         double distance = point.scanDistance;
+        angleDeg = -angleDeg;
 
-        if (distance <= 0.0 || distance > obstacleMaxDist)
+        double distance_m = distance / 1000.0;
+        double angleRad = angleDeg * M_PI / 180.0;
+        if (distance_m <= minDist || distance_m > maxDist)
             continue;
 
-        // angleDeg = -angleDeg;
+        if(positionHistory.size() < 2)
+            continue;
+        Position pos = interpolatePosition(point.timestamp);
+
+        double x_glob = pos.x + distance_m * cos(pos.fi + angleRad);
+        double y_glob = pos.y + distance_m * sin(pos.fi + angleRad);
+
+        int i = (x_glob / resolution) + gridWidth / 2;
+        int j = (y_glob / resolution) + gridHeight / 2;
+
+        if(i >= 0 && i < gridWidth && j >= 0 && j < gridHeight)
+        {
+            drawLine(robot_i, robot_j, i, j);
+            tempGrid[i][j]++;
+
+            if(tempGrid[i][j] >= 15)
+            {
+                grid[i][j] = 1;
+            }
+
+            if(tempGrid[i][j] > 80)
+            {
+                tempGrid[i][j] = 80;
+            }
+        }
 
         while (angleDeg >= 180.0) angleDeg -= 360.0;
         while (angleDeg < -180.0) angleDeg += 360.0;
 
+        //navigation
         int index = static_cast<int>((angleDeg + 180.0) / sectorWidthDeg);
 
         if (index < 0) index = 0;
@@ -293,14 +399,58 @@ int robot::processThisLidar(const std::vector<LaserData>& laserData)
         sectors[index] = 1;
     }
     emit publishLidar(copyOfLaserData);
-   // update();//tento prikaz prinuti prekreslit obrazovku.. zavola sa paintEvent funkcia
+    // update();//tento prikaz prinuti prekreslit obrazovku.. zavola sa paintEvent funkcia
 
 
     return 0;
 
 }
 
-  #ifndef DISABLE_OPENCV
+void robot::drawLine(int x0, int y0,
+                     int x1, int y1)
+{
+    int dx = abs(x1 - x0);
+    int dy = abs(y1 - y0);
+
+    int sx = (x0 < x1) ? 1 : -1;
+    int sy = (y0 < y1) ? 1 : -1;
+
+    int err = dx - dy;
+
+    while(true)
+    {
+        if(x0 >= 0 && x0 < gridWidth &&
+            y0 >= 0 && y0 < gridHeight)
+        {
+            if(grid[x0][y0] != 1)
+                grid[x0][y0] = 0;
+        }
+
+        if(x0 == x1 && y0 == y1)
+            break;
+
+        int e2 = 2 * err;
+
+        if(e2 > -dy)
+        {
+            err -= dy;
+            x0 += sx;
+        }
+
+        if(e2 < dx)
+        {
+            err += dx;
+            y0 += sy;
+        }
+    }
+}
+
+const std::vector<std::vector<int>>& robot::getGrid() const
+{
+    return grid;
+}
+
+#ifndef DISABLE_OPENCV
 ///toto je calback na data z kamery, ktory ste podhodili robotu vo funkcii initAndStartRobot
 /// vola sa ked dojdu nove data z kamery
 int robot::processThisCamera(cv::Mat cameraData)
@@ -314,7 +464,7 @@ int robot::processThisCamera(cv::Mat cameraData)
 }
 #endif
 
-  #ifndef DISABLE_SKELETON
+#ifndef DISABLE_SKELETON
 /// vola sa ked dojdu nove data z trackera
 int robot::processThisSkeleton(skeleton skeledata)
 {
