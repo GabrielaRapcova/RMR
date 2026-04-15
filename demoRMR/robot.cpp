@@ -170,7 +170,7 @@ int robot::processThisRobot(const TKobukiData &robotdata)
         double w_target = 0.0;
 
 
-        if(distance < 0.01)
+        if(distance < 0.05)
         {
             hasTarget = false;
             rotateMode = false;
@@ -261,7 +261,7 @@ int robot::processThisRobot(const TKobukiData &robotdata)
         }
 
 
-        if(!hasTarget && fabs(v_actual) < 0.01 && fabs(w_actual) < 0.01)
+        if(!hasTarget ||( fabs(v_actual) < 0.01 && fabs(w_actual) < 0.01))
         {
             setSpeed(0, 0);
         }
@@ -288,7 +288,7 @@ int robot::processThisRobot(const TKobukiData &robotdata)
     p.x = x;
     p.y = y;
     p.fi = fi;
-    p.timestamp = robotdata.timestamp;
+    p.timestamp = robotdata.synctimestamp;
 
     positionHistory.push_back(p);
     if(positionHistory.size() > 1000)
@@ -298,6 +298,13 @@ int robot::processThisRobot(const TKobukiData &robotdata)
 
     datacounter++;
     return 0;
+}
+
+double robot::normalizeAngle(double a) const
+{
+    while (a > M_PI)  a -= 2.0 * M_PI;
+    while (a < -M_PI) a += 2.0 * M_PI;
+    return a;
 }
 
 robot::Position robot::interpolatePosition(uint32_t time)
@@ -312,20 +319,15 @@ robot::Position robot::interpolatePosition(uint32_t time)
             Position p1 = positionHistory[i-1];
             Position p2 = positionHistory[i];
 
-            double ratio =
-                double(time - p1.timestamp) /
-                double(p2.timestamp - p1.timestamp);
+            double ratio = double(time - p1.timestamp) / double(p2.timestamp - p1.timestamp);
 
             Position result;
 
-            result.x =
-                p1.x + ratio * (p2.x - p1.x);
+            result.x = p1.x + ratio * (p2.x - p1.x);
+            result.y = p1.y + ratio * (p2.y - p1.y);
 
-            result.y =
-                p1.y + ratio * (p2.y - p1.y);
-
-            result.fi =
-                p1.fi + ratio * (p2.fi - p1.fi);
+            double dfi = normalizeAngle(p2.fi - p1.fi);
+            result.fi = normalizeAngle(p1.fi + ratio * dfi);
 
             result.timestamp = time;
 
@@ -346,7 +348,7 @@ int robot::processThisLidar(const std::vector<LaserData>& laserData)
     //tu mozete robit s datami z lidaru.. napriklad najst prekazky, zapisat do mapy. naplanovat ako sa prekazke vyhnut.
     // ale nic vypoctovo narocne - to iste vlakno ktore cita data z lidaru
     // updateLaserPicture=1;
-    sectors.assign(sectorCount, 0);
+
     int robot_i = (x / resolution) + gridWidth / 2;
     int robot_j = (y / resolution) + gridHeight / 2;
 
@@ -358,8 +360,11 @@ int robot::processThisLidar(const std::vector<LaserData>& laserData)
 
         double distance_m = distance / 1000.0;
         double angleRad = angleDeg * M_PI / 180.0;
-        if (distance_m <= minDist || distance_m > maxDist)
+        if (distance_m <= minDist || distance_m > maxDist ||
+            (distance_m >= 0.6 && distance_m <= 0.7))
+        {
             continue;
+        }
 
         if(positionHistory.size() < 2)
             continue;
@@ -376,27 +381,15 @@ int robot::processThisLidar(const std::vector<LaserData>& laserData)
             drawLine(robot_i, robot_j, i, j);
             tempGrid[i][j]++;
 
-            if(tempGrid[i][j] >= 15)
+            if(tempGrid[i][j] >= 20)
             {
                 grid[i][j] = 1;
-            }
-
-            if(tempGrid[i][j] > 80)
-            {
-                tempGrid[i][j] = 80;
             }
         }
 
         while (angleDeg >= 180.0) angleDeg -= 360.0;
         while (angleDeg < -180.0) angleDeg += 360.0;
 
-        //navigation
-        int index = static_cast<int>((angleDeg + 180.0) / sectorWidthDeg);
-
-        if (index < 0) index = 0;
-        if (index >= sectorCount) index = sectorCount - 1;
-
-        sectors[index] = 1;
     }
     emit publishLidar(copyOfLaserData);
     // update();//tento prikaz prinuti prekreslit obrazovku.. zavola sa paintEvent funkcia
@@ -406,8 +399,7 @@ int robot::processThisLidar(const std::vector<LaserData>& laserData)
 
 }
 
-void robot::drawLine(int x0, int y0,
-                     int x1, int y1)
+void robot::drawLine(int x0, int y0, int x1, int y1)
 {
     int dx = abs(x1 - x0);
     int dy = abs(y1 - y0);
@@ -417,31 +409,32 @@ void robot::drawLine(int x0, int y0,
 
     int err = dx - dy;
 
-    while(true)
+    while (true)
     {
-        if(x0 >= 0 && x0 < gridWidth &&
+        if (x0 >= 0 && x0 < gridWidth &&
             y0 >= 0 && y0 < gridHeight)
         {
-            if(grid[x0][y0] != 1)
-                grid[x0][y0] = 0;
+
+            if (grid[x0][y0] == 1)
+            {
+                if (tempGrid[x0][y0] < 10)
+                {
+                    tempGrid[x0][y0]--;
+
+                    if (tempGrid[x0][y0] < 5)
+                    {
+                        grid[x0][y0] = 0;
+                    }
+                }
+            }
         }
 
-        if(x0 == x1 && y0 == y1)
+        if (x0 == x1 && y0 == y1)
             break;
 
         int e2 = 2 * err;
-
-        if(e2 > -dy)
-        {
-            err -= dy;
-            x0 += sx;
-        }
-
-        if(e2 < dx)
-        {
-            err += dx;
-            y0 += sy;
-        }
+        if (e2 > -dy) { err -= dy; x0 += sx; }
+        if (e2 < dx)  { err += dx; y0 += sy; }
     }
 }
 

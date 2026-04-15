@@ -94,6 +94,7 @@ private:
   double minDist;
   double maxDist;
   void drawLine(int x0,int y0, int x1,int y1);
+  double normalizeAngle(double a) const;
 
   /// toto su callbacky co sa sa volaju s novymi datami
   int processThisLidar(const std::vector<LaserData> &laserData);
