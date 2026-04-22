@@ -145,8 +145,8 @@ int robot::processThisRobot(const TKobukiData &robotdata)
     fi = ((robotdata.GyroAngle - gyroOffset) / 100.0) * M_PI / 180.0;
 
     double dS = (dR + dL) / 2.0;
-    x += dS * cos(fi);
-    y += dS * sin(fi);
+    x += dS * cos(fi_old);
+    y += dS * sin(fi_old);
 
 
     if(datacounter % 5 == 0)
@@ -170,7 +170,7 @@ int robot::processThisRobot(const TKobukiData &robotdata)
         double w_target = 0.0;
 
 
-        if(distance < 0.05)
+        if(distance < 0.01)
         {
             hasTarget = false;
             rotateMode = false;
@@ -202,7 +202,7 @@ int robot::processThisRobot(const TKobukiData &robotdata)
                 w_target = 0.8 * angleError;
 
                 if(w_target > 0.5)  w_target = 0.5;
-                if(w_target < 0.5) w_target = 0.5;
+                if(w_target < -0.5) w_target = -0.5;
             }
             else
             {
@@ -353,22 +353,23 @@ int robot::processThisLidar(const std::vector<LaserData>& laserData)
     int robot_j = (y / resolution) + gridHeight / 2;
 
     for (const auto& point : laserData)
-    {
+    {   
+        if(positionHistory.size() < 2)
+            continue;
+        Position pos = interpolatePosition(point.timestamp);
+
         double angleDeg = point.scanAngle;
         double distance = point.scanDistance;
         angleDeg = -angleDeg;
 
         double distance_m = distance / 1000.0;
         double angleRad = angleDeg * M_PI / 180.0;
+
         if (distance_m <= minDist || distance_m > maxDist ||
             (distance_m >= 0.6 && distance_m <= 0.7))
         {
             continue;
         }
-
-        if(positionHistory.size() < 2)
-            continue;
-        Position pos = interpolatePosition(point.timestamp);
 
         double x_glob = pos.x + distance_m * cos(pos.fi + angleRad);
         double y_glob = pos.y + distance_m * sin(pos.fi + angleRad);
@@ -381,7 +382,7 @@ int robot::processThisLidar(const std::vector<LaserData>& laserData)
             drawLine(robot_i, robot_j, i, j);
             tempGrid[i][j]++;
 
-            if(tempGrid[i][j] >= 20)
+            if(tempGrid[i][j] >= 25)
             {
                 grid[i][j] = 1;
             }
@@ -394,9 +395,7 @@ int robot::processThisLidar(const std::vector<LaserData>& laserData)
     emit publishLidar(copyOfLaserData);
     // update();//tento prikaz prinuti prekreslit obrazovku.. zavola sa paintEvent funkcia
 
-
     return 0;
-
 }
 
 void robot::drawLine(int x0, int y0, int x1, int y1)
@@ -421,7 +420,7 @@ void robot::drawLine(int x0, int y0, int x1, int y1)
                 {
                     tempGrid[x0][y0]--;
 
-                    if (tempGrid[x0][y0] < 5)
+                    if (tempGrid[x0][y0] < 3)
                     {
                         grid[x0][y0] = 0;
                     }
