@@ -145,8 +145,8 @@ int robot::processThisRobot(const TKobukiData &robotdata)
     fi = ((robotdata.GyroAngle - gyroOffset) / 100.0) * M_PI / 180.0;
 
     double dS = (dR + dL) / 2.0;
-    x += dS * cos(fi_old);
-    y += dS * sin(fi_old);
+    x += dS * cos(fi);
+    y += dS * sin(fi);
 
 
     if(datacounter % 5 == 0)
