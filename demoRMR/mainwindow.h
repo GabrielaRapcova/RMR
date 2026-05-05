@@ -1,91 +1,86 @@
 #ifndef MAINWINDOW_H
 #define MAINWINDOW_H
+
 #include <QMainWindow>
 #include <QTimer>
 #include <iostream>
-// #include<arpa/inet.h>
-// #include<unistd.h>
-// #include<sys/socket.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
 #include <vector>
 
-// #include "ckobuki.h"
-// #include "rplidar.h"
-
 #include "robot.h"
-#include "map.h"
+
 #ifndef DISABLE_JOYSTICK
 #include <QJoysticks.h>
 #endif
+
 namespace Ui {
 class MainWindow;
 }
 
-/// toto je trieda s oknom.. ktora sa spusti ked sa spusti aplikacia.. su tu
-/// vsetky gombiky a spustania...
+///
+/// Trieda hlavného okna aplikácie – obsahuje všetky gombíky a spúšťanie robota.
+///
 class MainWindow : public QMainWindow {
-  Q_OBJECT
+    Q_OBJECT
 
 public:
 #ifndef DISABLE_OPENCV
-  bool useCamera1;
-  int actIndex;
-  cv::Mat frame[3];
+    bool useCamera1;
+    int actIndex;
+    cv::Mat frame[3];
 #endif
 
 #ifndef DISABLE_SKELETON
-  int updateSkeletonPicture;
-  skeleton skeleJoints;
+    int updateSkeletonPicture;
+    skeleton skeleJoints;
 #endif
-  explicit MainWindow(QWidget *parent = 0);
-  ~MainWindow();
+
+    explicit MainWindow(QWidget *parent = nullptr);
+    ~MainWindow();
 
 private slots:
-  void on_pushButton_10_clicked();
+    // štart
+    void on_pushButton_9_clicked();
+    // manuálne ovládanie
+    void on_pushButton_2_clicked(); // dopredu
+    void on_pushButton_3_clicked(); // dozadu
+    void on_pushButton_6_clicked(); // doľava
+    void on_pushButton_5_clicked(); // doprava
+    void on_pushButton_4_clicked(); // stop
+    void on_pushButton_clicked();   // prepínanie kamera/laser
+    void on_pushButton_10_clicked(); // ➕ GO TO TARGET (zadanie cieľa X, Y)
 
-  void on_pushButton_9_clicked();
-
-  void on_pushButton_2_clicked();
-
-  void on_pushButton_3_clicked();
-
-  void on_pushButton_6_clicked();
-
-  void on_pushButton_5_clicked();
-
-  void on_pushButton_4_clicked();
-
-  void on_pushButton_clicked();
-
-  int paintThisLidar(const std::vector<LaserData> &laserData);
+    // kreslenie dát
+    int paintThisLidar(const std::vector<LaserData> &laserData);
 #ifndef DISABLE_OPENCV
-  int paintThisCamera(const cv::Mat &cameraData);
+    int paintThisCamera(const cv::Mat &cameraData);
 #endif
 #ifndef DISABLE_SKELETON
-  int paintThisSkeleton(const skeleton &skeledata);
+    int paintThisSkeleton(const skeleton &skeledata);
 #endif
-private:
-  robot _robot;
-  MapWidget *mapWidget;
-  //--skuste tu nic nevymazat... pridavajte co chcete, ale pri odoberani by sa
-  // mohol stat nejaky drobny problem, co bude vyhadzovat chyby
-  Ui::MainWindow *ui;
-  void paintEvent(QPaintEvent *event); // Q_DECL_OVERRIDE;
-  int updateLaserPicture;
-  std::vector<LaserData> copyOfLaserData;
-  int datacounter;
-  std::string ipaddress;
 
-  QTimer *timer;
+private:
+    robot _robot;
+    Ui::MainWindow *ui;
+
+    void paintEvent(QPaintEvent *event) override;
+
+    int updateLaserPicture;
+    std::vector<LaserData> copyOfLaserData;
+    int datacounter;
+    std::string ipaddress;
+
+    QTimer *timer;
+
 #ifndef DISABLE_JOYSTICK
-  QJoysticks *instance;
+    QJoysticks *instance;
 #endif
+
 public slots:
-  void setUiValues(double robotX, double robotY, double robotFi);
-    //goalX,goalY
+    void setUiValues(double robotX, double robotY, double robotFi);
 };
 
 #endif // MAINWINDOW_H

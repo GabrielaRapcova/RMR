@@ -1,6 +1,5 @@
 #include "robot.h"
 #include <cmath>
-// #include <iostream>
 #include <string>
 #include <vector>
 
@@ -16,42 +15,24 @@ robot::robot(QObject *parent) : QObject(parent)
     v_actual = 0;
     w_actual = 0.0;
 
+    lidarReady = false;
+
     datacounter = 0;
     rotateMode = false;
     gyroOffset = 0.0;
     gyroInitialized = false;
-
-    //mapping
-    resolution = 0.05;
-    gridWidth = 14/resolution;
-    gridHeight = 14/resolution;
-
-    grid.resize(gridWidth);
-    for(int i = 0; i < gridWidth; i++)
-    {
-        grid[i].resize(gridHeight);
-    }
-
-    tempGrid.resize(gridWidth);
-    for(int i = 0; i < gridWidth; i++)
-    {
-        tempGrid[i].resize(gridHeight);
-
-        for(int j = 0; j < gridHeight; j++)
-        {
-            tempGrid[i][j] = 0;
-        }
-    }
-    minDist = 0.23;
-    maxDist = 3.0;
-
-    //navigacia
-    sectorCount = 36;
+    sectorCount = 72;
     sectorWidthDeg = 360.0 / sectorCount;
-    sectors.resize(sectorCount, 0);
-    obstacleMaxDist = 1.5;
+    sectors.resize(sectorCount, 0.0);
+    binarySectors.resize(sectorCount, 0);
+    maskedSectors.resize(sectorCount, 0);
+    obstacleMaxDist = 700.0;
     bestDirectionDeg = 0.0;
+    robotRadius = 0.18;
+    safetyMargin = 0.1;
+
     qRegisterMetaType<LaserMeasurement>("LaserMeasurement");
+    qRegisterMetaType<std::vector<int>>("std::vector<int>");
 #ifndef DISABLE_OPENCV
     qRegisterMetaType<cv::Mat>("cv::Mat");
 #endif
@@ -62,23 +43,29 @@ robot::robot(QObject *parent) : QObject(parent)
 
 void robot::initAndStartRobot(std::string ipaddress)
 {
+    forwardspeed = 0;
+    rotationspeed = 0;
 
-    forwardspeed=0;
-    rotationspeed=0;
-    ///setovanie veci na komunikaciu s robotom/lidarom/kamerou.. su tam adresa porty a callback.. laser ma ze sa da dat callback aj ako lambda.
-    /// lambdy su super, setria miesto a ak su rozumnej dlzky,tak aj prehladnost... ak ste o nich nic nepoculi poradte sa s vasim doktorom alebo lekarnikom...
-    robotCom.setLaserParameters([this](const std::vector<LaserData>& dat)->int{return processThisLidar(dat);},ipaddress);
-    robotCom.setRobotParameters([this](const TKobukiData& dat)->int{return processThisRobot(dat);},ipaddress);
+    robotCom.setLaserParameters(
+        [this](const std::vector<LaserData>& dat)->int { return processThisLidar(dat); },
+        ipaddress);
+
+    robotCom.setRobotParameters(
+        [this](const TKobukiData& dat)->int { return processThisRobot(dat); },
+        ipaddress);
+
 #ifndef DISABLE_OPENCV
-    robotCom.setCameraParameters(std::bind(&robot::processThisCamera,this,std::placeholders::_1),"http://"+ipaddress+":8000/stream.mjpg");
+    robotCom.setCameraParameters(
+        std::bind(&robot::processThisCamera, this, std::placeholders::_1),
+        "http://" + ipaddress + ":8000/stream.mjpg");
 #endif
+
 #ifndef DISABLE_SKELETON
-    robotCom.setSkeletonParameters(std::bind(&robot::processThisSkeleton,this,std::placeholders::_1));
+    robotCom.setSkeletonParameters(
+        std::bind(&robot::processThisSkeleton, this, std::placeholders::_1));
 #endif
-    ///ked je vsetko nasetovane tak to tento prikaz spusti (ak nieco nieje setnute,tak to normalne nenastavi.cize ak napr nechcete kameru,vklude vsetky info o nej vymazte)
+
     robotCom.robotStart();
-
-
 }
 
 void robot::setTarget(double x, double y)
@@ -93,26 +80,28 @@ void robot::setTarget(double x, double y)
 
 void robot::setSpeedVal(double forw, double rots)
 {
-    forwardspeed=forw;
-    rotationspeed=rots;
-    useDirectCommands=0;
+    forwardspeed = forw;
+    rotationspeed = rots;
+    useDirectCommands = 0;
 }
 
 void robot::setSpeed(double forw, double rots)
 {
-    if(forw==0 && rots!=0)
+    v_actual = forw;
+    w_actual = rots;
+
+    if(forw == 0 && rots != 0)
         robotCom.setRotationSpeed(rots);
-    else if(forw!=0 && rots==0)
+    else if(forw != 0 && rots == 0)
         robotCom.setTranslationSpeed(forw);
-    else if((forw!=0 && rots!=0))
-        robotCom.setArcSpeed(forw,forw/rots);
+    else if(forw != 0 && rots != 0)
+        robotCom.setArcSpeed(forw, forw / rots);
     else
         robotCom.setTranslationSpeed(0);
-    useDirectCommands=1;
+
+    useDirectCommands = 1;
 }
 
-///toto je calback na data z robota, ktory ste podhodili robotu vo funkcii initAndStartRobot
-/// vola sa vzdy ked dojdu nove data z robota. nemusite nic riesit, proste sa to stane
 int robot::processThisRobot(const TKobukiData &robotdata)
 {
     if(datacounter == 0)
@@ -129,16 +118,13 @@ int robot::processThisRobot(const TKobukiData &robotdata)
 
     if(deltaL > 32768) deltaL -= 65536;
     if(deltaL < -32768) deltaL += 65536;
-
     if(deltaR > 32768) deltaR -= 65536;
     if(deltaR < -32768) deltaR += 65536;
 
     prevEncoderLeft = robotdata.EncoderLeft;
     prevEncoderRight = robotdata.EncoderRight;
 
-    double tickToMeter = 0.000085292090497737556558;
-    double wheelBase = 0.23;
-
+    const double tickToMeter = 0.000085292090497737556558;
     double dL = tickToMeter * deltaL;
     double dR = tickToMeter * deltaR;
 
@@ -148,322 +134,232 @@ int robot::processThisRobot(const TKobukiData &robotdata)
     x += dS * cos(fi);
     y += dS * sin(fi);
 
-
     if(datacounter % 5 == 0)
-    {
         emit publishPosition(x, y, fi);
-    }
 
     if(hasTarget)
     {
         double dx = targetX - x;
         double dy = targetY - y;
-
         double distance = sqrt(dx*dx + dy*dy);
-        double targetAngle = atan2(dy, dx);
-        double angleError = targetAngle - fi;
 
-        if(angleError > M_PI)  angleError -= 2.0 * M_PI;
-        if(angleError < -M_PI) angleError += 2.0 * M_PI;
+        double goalAngle = atan2(dy, dx);
+        double goalRelative = goalAngle - fi;
 
-        double v_target = 0.0;
-        double w_target = 0.0;
+        while(goalRelative > M_PI) goalRelative -= 2*M_PI;
+        while(goalRelative < -M_PI) goalRelative += 2*M_PI;
 
+        double goalDeg = goalRelative * 180.0 / M_PI;
 
-        if(distance < 0.01)
+        if(distance < 0.05)
         {
             hasTarget = false;
-            rotateMode = false;
-            v_target = 0.0;
-            w_target = 0.0;
-            v_actual = 0.0;
-            w_actual = 0.0;
-        }
-        else
-        {
-            double enterRot = 0.20;
-            double exitRot  = 0.10;
-
-            if(rotateMode)
-            {
-                if(fabs(angleError) < exitRot)
-                    rotateMode = false;
-            }
-            else
-            {
-                if(fabs(angleError) > enterRot)
-                    rotateMode = true;
-            }
-
-            if(rotateMode)
-            {
-
-                v_target = 0.0;
-                w_target = 0.8 * angleError;
-
-                if(w_target > 0.5)  w_target = 0.5;
-                if(w_target < -0.5) w_target = -0.5;
-            }
-            else
-            {
-
-                double v_max = 250.0;
-                double v_min = 20.0;
-                double slowDownDist = 0.2;
-
-                if(distance > slowDownDist)
-                {
-                    v_target = v_max;
-                }
-                else
-                {
-                    v_target = v_min + (v_max - v_min) * (distance / slowDownDist);
-                }
-
-                if(v_target < v_min) v_target = v_min;
-                if(v_target > v_max) v_target = v_max;
-
-
-                /*double angleScale = cos(angleError);
-                if(angleScale < 0.0) angleScale = 0.0;
-                v_target *= angleScale;*/
-
-
-                w_target = 0.8 * angleError;
-                if(w_target > 0.5)  w_target = 0.5;
-                if(w_target < -0.5) w_target = -0.5;
-            }
-        }
-
-        double acc_v = 8.0;
-        double acc_v2 = 15.0;
-        if(v_actual < v_target)
-        {
-            v_actual += acc_v;
-            if(v_actual > v_target) v_actual = v_target;
-        }
-        else if(v_actual > v_target)
-        {
-            v_actual -= acc_v2;
-            if(v_actual < v_target) v_actual = v_target;
-        }
-
-        double acc_w = 0.05;
-        if(w_actual < w_target)
-        {
-            w_actual += acc_w;
-            if(w_actual > w_target) w_actual = w_target;
-        }
-        else if(w_actual > w_target)
-        {
-            w_actual -= acc_w;
-            if(w_actual < w_target) w_actual = w_target;
-        }
-
-
-        if(!hasTarget ||( fabs(v_actual) < 0.01 && fabs(w_actual) < 0.01))
-        {
             setSpeed(0, 0);
+            datacounter++;
+            return 0;
         }
-        else
+
+        if(!lidarReady)
         {
-            setSpeed(v_actual, w_actual);
+            if(fabs(goalRelative) > 0.2)
+                setSpeed(0, 0.8 * goalRelative);
+            else
+                setSpeed(100, 0);
+
+            datacounter++;
+            return 0;
         }
-    }
 
-    if(useDirectCommands == 0)
-    {
-        if(forwardspeed == 0 && rotationspeed != 0)
-            robotCom.setRotationSpeed(rotationspeed);
-        else if(forwardspeed != 0 && rotationspeed == 0)
-            robotCom.setTranslationSpeed(forwardspeed);
-        else if((forwardspeed != 0 && rotationspeed != 0))
-            robotCom.setArcSpeed(forwardspeed, forwardspeed / rotationspeed);
+        auto angleToSector = [this](double angleDeg)->int
+        {
+            while(angleDeg >= 180.0) angleDeg -= 360.0;
+            while(angleDeg <  -180.0) angleDeg += 360.0;
+
+            int idx = static_cast<int>((angleDeg + 180.0) / sectorWidthDeg);
+            return (idx % sectorCount + sectorCount) % sectorCount;
+        };
+
+        std::vector<double> candidates = candidateDirections;
+
+        int goalIdx = angleToSector(goalDeg);
+        if(maskedSectors[goalIdx] == 0)
+            candidates.push_back(goalDeg);
+
+        bool ignoreMask = (fabs(v_actual) < 20);
+        std::vector<double> feasible;
+
+        for(double cand : candidates)
+        {
+            int idx = angleToSector(cand);
+            if(ignoreMask || maskedSectors[idx] == 0)
+                feasible.push_back(cand);
+        }
+
+        if(feasible.empty())
+        {
+            setSpeed(0, 0.4);
+            return 0;
+        }
+
+        double bestCost = 1e9;
+        double chosenDeg = feasible.front();
+
+        for(double cand : feasible)
+        {
+            auto angleDiff = [](double a, double b)
+            {
+                double d = a - b;
+                while(d > 180) d -= 360;
+                while(d < -180) d += 360;
+                return fabs(d);
+            };
+
+            double goalDiff  = angleDiff(cand, goalDeg);
+            double robotDiff = angleDiff(cand, 0.0);
+            double prevDiff  = angleDiff(cand, bestDirectionDeg);
+            double obstaclePenalty = sectors[angleToSector(cand)];
+
+            double cost = 4.0 * goalDiff + 2.0 * robotDiff + 4.0 * prevDiff + 0.5 * obstaclePenalty;;
+
+            if(cost < bestCost)
+            {
+                bestCost = cost;
+                chosenDeg = cand;
+            }
+        }
+
+        bestDirectionDeg = chosenDeg;
+
+        double angleError = chosenDeg * M_PI / 180.0;
+
+        if(fabs(angleError) > 0.6)
+            setSpeed(0, 0.9 * angleError);
+        else if(fabs(angleError) > 0.25)
+            setSpeed(80, 0.8 * angleError);
         else
-            robotCom.setTranslationSpeed(0);
-    }
-
-    Position p;
-
-    p.x = x;
-    p.y = y;
-    p.fi = fi;
-    p.timestamp = robotdata.synctimestamp;
-
-    positionHistory.push_back(p);
-    if(positionHistory.size() > 1000)
-    {
-        positionHistory.erase(positionHistory.begin());
+            setSpeed(150, 0.5 * angleError);
     }
 
     datacounter++;
     return 0;
 }
 
-double robot::normalizeAngle(double a) const
-{
-    while (a > M_PI)  a -= 2.0 * M_PI;
-    while (a < -M_PI) a += 2.0 * M_PI;
-    return a;
-}
-
-robot::Position robot::interpolatePosition(uint32_t time)
-{
-    if(positionHistory.size() < 2)
-        return positionHistory.back();
-
-    for(int i=1; i<positionHistory.size(); i++)
-    {
-        if(positionHistory[i].timestamp >= time)
-        {
-            Position p1 = positionHistory[i-1];
-            Position p2 = positionHistory[i];
-
-            double ratio = double(time - p1.timestamp) / double(p2.timestamp - p1.timestamp);
-
-            Position result;
-
-            result.x = p1.x + ratio * (p2.x - p1.x);
-            result.y = p1.y + ratio * (p2.y - p1.y);
-
-            double dfi = normalizeAngle(p2.fi - p1.fi);
-            result.fi = normalizeAngle(p1.fi + ratio * dfi);
-
-            result.timestamp = time;
-
-            return result;
-        }
-    }
-
-    return positionHistory.back();
-}
-
-///toto je calback na data z lidaru, ktory ste podhodili robotu vo funkcii initAndStartRobot
-/// vola sa ked dojdu nove data z lidaru
 int robot::processThisLidar(const std::vector<LaserData>& laserData)
 {
+    copyOfLaserData = laserData;
 
-    copyOfLaserData=laserData;
+    sectors.assign(sectorCount, 0.0);
+    binarySectors.assign(sectorCount, 0);
+    maskedSectors.assign(sectorCount, 0);
+    freeGaps.clear();
+    candidateDirections.clear();
 
-    //tu mozete robit s datami z lidaru.. napriklad najst prekazky, zapisat do mapy. naplanovat ako sa prekazke vyhnut.
-    // ale nic vypoctovo narocne - to iste vlakno ktore cita data z lidaru
-    // updateLaserPicture=1;
-
-    int robot_i = (x / resolution) + gridWidth / 2;
-    int robot_j = (y / resolution) + gridHeight / 2;
-
-    for (const auto& point : laserData)
-    {   
-        if(positionHistory.size() < 2)
-            continue;
-        Position pos = interpolatePosition(point.timestamp);
-
-        double angleDeg = point.scanAngle;
+    for(const auto& point : laserData)
+    {
+        double angleDeg = -point.scanAngle;
         double distance = point.scanDistance;
-        angleDeg = -angleDeg;
 
-        double distance_m = distance / 1000.0;
-        double angleRad = angleDeg * M_PI / 180.0;
-
-        if (distance_m <= minDist || distance_m > maxDist ||
-            (distance_m >= 0.6 && distance_m <= 0.7))
-        {
+        if(distance <= 0.0 || distance > obstacleMaxDist)
             continue;
-        }
 
-        double x_glob = pos.x + distance_m * cos(pos.fi + angleRad);
-        double y_glob = pos.y + distance_m * sin(pos.fi + angleRad);
+        while(angleDeg >= 180.0) angleDeg -= 360.0;
+        while(angleDeg <  -180.0) angleDeg += 360.0;
 
-        int i = (x_glob / resolution) + gridWidth / 2;
-        int j = (y_glob / resolution) + gridHeight / 2;
+        int idx = (angleDeg + 180.0) / sectorWidthDeg;
+        idx = std::max(0, std::min(sectorCount - 1, idx));
 
-        if(i >= 0 && i < gridWidth && j >= 0 && j < gridHeight)
+        sectors[idx] += (obstacleMaxDist - distance);
+    }
+
+    double threshold = 30.0;
+    for(int i = 0; i < sectorCount; i++)
+        binarySectors[i] = (sectors[i] > threshold) ? 1 : 0;
+
+    for(int i = 0; i < sectorCount; i++)
+    {
+        if(binarySectors[i] == 1)
         {
-            drawLine(robot_i, robot_j, i, j);
-            tempGrid[i][j]++;
+            double approxDist = obstacleMaxDist - sectors[i];
+            approxDist = std::max(approxDist, 1.0);
 
-            if(tempGrid[i][j] >= 25)
+            double effectiveRadius = robotRadius + safetyMargin;
+
+            double angleExpandRad = atan2(effectiveRadius, approxDist);
+            double angleExpandDeg = angleExpandRad * 180.0 / M_PI;
+
+            int expand = std::max(2, (int)(angleExpandDeg / sectorWidthDeg));
+
+            for(int j = -expand; j <= expand; j++)
             {
-                grid[i][j] = 1;
+                int idx = i + j;
+                if(idx >= 0 && idx < sectorCount)
+                    maskedSectors[idx] = 1;
             }
         }
-
-        while (angleDeg >= 180.0) angleDeg -= 360.0;
-        while (angleDeg < -180.0) angleDeg += 360.0;
-
     }
-    emit publishLidar(copyOfLaserData);
-    // update();//tento prikaz prinuti prekreslit obrazovku.. zavola sa paintEvent funkcia
 
+    bool inGap = false;
+    int start = 0;
+
+    for(int i = 0; i < sectorCount; i++)
+    {
+        if(maskedSectors[i] == 0 && !inGap)
+        {
+            inGap = true;
+            start = i;
+        }
+        else if(maskedSectors[i] == 1 && inGap)
+        {
+            inGap = false;
+            freeGaps.push_back({start, i - 1});
+        }
+    }
+
+    if(inGap)
+        freeGaps.push_back({start, sectorCount - 1});
+
+    int wideThreshold = 8;
+
+    for(auto& g : freeGaps)
+    {
+        int width = g.second - g.first + 1;
+
+        if(width < wideThreshold)
+        {
+            int mid = (g.first + g.second) / 2;
+            candidateDirections.push_back(mid * sectorWidthDeg - 180.0);
+        }
+        else
+        {
+            int left = g.first + width * 0.25;
+            int right = g.second - width * 0.25;
+
+            candidateDirections.push_back(left * sectorWidthDeg - 180.0);
+            candidateDirections.push_back(right * sectorWidthDeg - 180.0);
+        }
+    }
+
+    emit publishLidar(copyOfLaserData);
+    lidarReady = true;
     return 0;
 }
 
-void robot::drawLine(int x0, int y0, int x1, int y1)
-{
-    int dx = abs(x1 - x0);
-    int dy = abs(y1 - y0);
-
-    int sx = (x0 < x1) ? 1 : -1;
-    int sy = (y0 < y1) ? 1 : -1;
-
-    int err = dx - dy;
-
-    while (true)
-    {
-        if (x0 >= 0 && x0 < gridWidth &&
-            y0 >= 0 && y0 < gridHeight)
-        {
-
-            if (grid[x0][y0] == 1)
-            {
-                if (tempGrid[x0][y0] < 10)
-                {
-                    tempGrid[x0][y0]--;
-
-                    if (tempGrid[x0][y0] < 3)
-                    {
-                        grid[x0][y0] = 0;
-                    }
-                }
-            }
-        }
-
-        if (x0 == x1 && y0 == y1)
-            break;
-
-        int e2 = 2 * err;
-        if (e2 > -dy) { err -= dy; x0 += sx; }
-        if (e2 < dx)  { err += dx; y0 += sy; }
-    }
-}
-
-const std::vector<std::vector<int>>& robot::getGrid() const
-{
-    return grid;
-}
-
 #ifndef DISABLE_OPENCV
-///toto je calback na data z kamery, ktory ste podhodili robotu vo funkcii initAndStartRobot
-/// vola sa ked dojdu nove data z kamery
 int robot::processThisCamera(cv::Mat cameraData)
 {
-
-    cameraData.copyTo(frame[(actIndex+1)%3]);//kopirujem do nasej strukury
-    actIndex=(actIndex+1)%3;//aktualizujem kde je nova fotka
-
+    cameraData.copyTo(frame[(actIndex+1)%3]);
+    actIndex=(actIndex+1)%3;
     emit publishCamera(frame[actIndex]);
     return 0;
 }
 #endif
 
 #ifndef DISABLE_SKELETON
-/// vola sa ked dojdu nove data z trackera
 int robot::processThisSkeleton(skeleton skeledata)
 {
-
     memcpy(&skeleJoints,&skeledata,sizeof(skeleton));
-
     emit publishSkeleton(skeleJoints);
     return 0;
 }
 #endif
+
