@@ -72,6 +72,7 @@ private:
     double gyroOffset;
     bool gyroInitialized;
 
+    bool wallFollowing;
     bool rotateMode;
     bool hasTarget;
     double targetX;
@@ -86,6 +87,7 @@ private:
     double sectorWidthDeg;
     double obstacleMaxDist;
 
+    double wallFollowDirection;
     std::vector<double> lastDirections;
     int memorySize = 5;
     double currentObstacleDist;

@@ -7,7 +7,7 @@ MainWindow::MainWindow(QWidget *parent) :
     QMainWindow(parent),
     ui(new Ui::MainWindow)
 {
-    ipaddress = "127.0.0.1";
+    ipaddress = "192.168.1.12"; //127.0.0.1
     ui->setupUi(this);
 
     datacounter = 0;

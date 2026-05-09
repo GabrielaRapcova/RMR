@@ -28,8 +28,10 @@ robot::robot(QObject *parent) : QObject(parent)
     maskedSectors.resize(sectorCount, 0);
     obstacleMaxDist = 700.0;
     bestDirectionDeg = 0.0;
-    robotRadius = 0.18;
-    safetyMargin = 0.1;
+    robotRadius = 0.12;
+    safetyMargin = 0.0;
+    wallFollowing = false;
+    wallFollowDirection = 0.0;
 
     qRegisterMetaType<LaserMeasurement>("LaserMeasurement");
     qRegisterMetaType<std::vector<int>>("std::vector<int>");
@@ -161,15 +163,18 @@ int robot::processThisRobot(const TKobukiData &robotdata)
 
         if(!lidarReady)
         {
+            // natoc na ciel
             if(fabs(goalRelative) > 0.2)
                 setSpeed(0, 0.8 * goalRelative);
+
+            // jazda rovno
             else
-                setSpeed(100, 0);
+                setSpeed(100,0);
 
             datacounter++;
             return 0;
         }
-
+        //prevod uhla na sector
         auto angleToSector = [this](double angleDeg)->int
         {
             while(angleDeg >= 180.0) angleDeg -= 360.0;
@@ -179,12 +184,15 @@ int robot::processThisRobot(const TKobukiData &robotdata)
             return (idx % sectorCount + sectorCount) % sectorCount;
         };
 
+        // je gol blokovany
+        int goalIdx = angleToSector(goalDeg);
+        bool goalBlocked = maskedSectors[goalIdx] == 1;
+
         std::vector<double> candidates = candidateDirections;
 
-        int goalIdx = angleToSector(goalDeg);
-        if(maskedSectors[goalIdx] == 0)
-            candidates.push_back(goalDeg);
+        candidates.push_back(goalDeg);
 
+        //ignorovanie masky
         bool ignoreMask = (fabs(v_actual) < 20);
         std::vector<double> feasible;
 
@@ -195,6 +203,7 @@ int robot::processThisRobot(const TKobukiData &robotdata)
                 feasible.push_back(cand);
         }
 
+        //obzeranie volneho smeru
         if(feasible.empty())
         {
             setSpeed(0, 0.4);
@@ -214,12 +223,44 @@ int robot::processThisRobot(const TKobukiData &robotdata)
                 return fabs(d);
             };
 
+            //nastavovanie váh
             double goalDiff  = angleDiff(cand, goalDeg);
             double robotDiff = angleDiff(cand, 0.0);
             double prevDiff  = angleDiff(cand, bestDirectionDeg);
             double obstaclePenalty = sectors[angleToSector(cand)];
 
-            double cost = 4.0 * goalDiff + 2.0 * robotDiff + 4.0 * prevDiff + 0.5 * obstaclePenalty;;
+            if(goalBlocked && !wallFollowing)
+            {
+                wallFollowing = true;
+                wallFollowDirection = bestDirectionDeg;
+            }
+
+            if(!goalBlocked && fabs(goalDeg) < 20)
+            {
+                wallFollowing = false;
+            }
+
+
+            double cost;
+
+            if(wallFollowing)
+            {
+                double wallDiff = angleDiff(cand, wallFollowDirection);
+
+                cost =
+                    1.5 * goalDiff +
+                    1.0 * robotDiff +
+                    2.5 * wallDiff +
+                    0.5 * obstaclePenalty;
+            }
+            else
+            {
+                cost =
+                    4.3 * goalDiff +
+                    2.0 * robotDiff +
+                    4.0 * prevDiff +
+                    0.5 * obstaclePenalty;
+            }
 
             if(cost < bestCost)
             {
@@ -254,6 +295,7 @@ int robot::processThisLidar(const std::vector<LaserData>& laserData)
     freeGaps.clear();
     candidateDirections.clear();
 
+    //polarny histogram
     for(const auto& point : laserData)
     {
         double angleDeg = -point.scanAngle;
@@ -268,13 +310,43 @@ int robot::processThisLidar(const std::vector<LaserData>& laserData)
         int idx = (angleDeg + 180.0) / sectorWidthDeg;
         idx = std::max(0, std::min(sectorCount - 1, idx));
 
-        sectors[idx] += (obstacleMaxDist - distance);
+        double a = obstacleMaxDist;
+        double b = 1.0;
+        double c = 1.0;
+
+        double mi = c * c * (a - b * distance);
+
+        if(mi < 0)
+            mi = 0;
+
+        sectors[idx] += mi;
     }
 
-    double threshold = 30.0;
-    for(int i = 0; i < sectorCount; i++)
-        binarySectors[i] = (sectors[i] > threshold) ? 1 : 0;
+    double thresholdHigh = 40.0;
+    double thresholdLow  = 20.0;
 
+    std::vector<int> previousBinary = binarySectors;
+
+    for(int i = 0; i < sectorCount; i++)
+    {
+        //obsadeny
+        if(sectors[i] > thresholdHigh)
+        {
+            binarySectors[i] = 1;
+        }
+        //volny
+        else if(sectors[i] < thresholdLow)
+        {
+            binarySectors[i] = 0;
+        }
+        //mozno
+        else
+        {
+            binarySectors[i] = previousBinary[i];
+        }
+    }
+
+    //zvacsenie neprechodnosti + maskovanie
     for(int i = 0; i < sectorCount; i++)
     {
         if(binarySectors[i] == 1)
@@ -284,7 +356,11 @@ int robot::processThisLidar(const std::vector<LaserData>& laserData)
 
             double effectiveRadius = robotRadius + safetyMargin;
 
-            double angleExpandRad = atan2(effectiveRadius, approxDist);
+            double ratio = effectiveRadius / approxDist;
+
+            ratio = std::min(1.0, ratio);
+
+            double angleExpandRad = asin(ratio);
             double angleExpandDeg = angleExpandRad * 180.0 / M_PI;
 
             int expand = std::max(2, (int)(angleExpandDeg / sectorWidthDeg));
@@ -301,6 +377,7 @@ int robot::processThisLidar(const std::vector<LaserData>& laserData)
     bool inGap = false;
     int start = 0;
 
+    //zaplnanie gap
     for(int i = 0; i < sectorCount; i++)
     {
         if(maskedSectors[i] == 0 && !inGap)
@@ -320,13 +397,14 @@ int robot::processThisLidar(const std::vector<LaserData>& laserData)
 
     int wideThreshold = 8;
 
+    //vyber smeru
     for(auto& g : freeGaps)
     {
-        int width = g.second - g.first + 1;
+        int width = g.second - g.first + 1;  //gap
 
         if(width < wideThreshold)
         {
-            int mid = (g.first + g.second) / 2;
+            int mid = (g.first + g.second) / 2;  //stred
             candidateDirections.push_back(mid * sectorWidthDeg - 180.0);
         }
         else
