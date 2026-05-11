@@ -67,9 +67,11 @@ robot::robot(QObject *parent) : QObject(parent)
     obstacleMaxDist = 1.5;
     bestDirectionDeg = 0.0;
     mappingEnabled = true;
+
     //monte carlo
+    localizationEnabled = false;
+
     particleCount = 1000;
-    initializeParticles();
     a1 = 0.02;
     a2 = 0.02;
     a3 = 0.02;
@@ -264,6 +266,28 @@ void robot::motionUpdate()
 
 void robot::computeDistanceField()
 {
+    bool obstacleFound = false;
+
+    for(int i = 0; i < gridWidth; i++)
+    {
+        for(int j = 0; j < gridHeight; j++)
+        {
+            if(grid[i][j] == 1)
+            {
+                obstacleFound = true;
+                break;
+            }
+        }
+
+        if(obstacleFound)
+            break;
+    }
+
+    if(!obstacleFound)
+        return;
+
+    int searchRadius = 20;
+
     for(int i = 0; i < gridWidth; i++)
     {
         for(int j = 0; j < gridHeight; j++)
@@ -276,9 +300,13 @@ void robot::computeDistanceField()
 
             double minDistSq = 1e9;
 
-            for(int x = 0; x < gridWidth; x++)
+            for(int x = std::max(0, i - searchRadius);
+                 x < std::min(gridWidth, i + searchRadius);
+                 x++)
             {
-                for(int y = 0; y < gridHeight; y++)
+                for(int y = std::max(0, j - searchRadius);
+                     y < std::min(gridHeight, j + searchRadius);
+                     y++)
                 {
                     if(grid[x][y] == 1)
                     {
@@ -286,7 +314,7 @@ void robot::computeDistanceField()
                         double dy = j - y;
 
                         double distSq =
-                            dx*dx + dy*dy;
+                            dx * dx + dy * dy;
 
                         if(distSq < minDistSq)
                         {
@@ -822,13 +850,28 @@ int robot::processThisLidar(const std::vector<LaserData>& laserData)
         while (angleDeg < -180.0) angleDeg += 360.0;
 
     }
-    measurementUpdate();
-    resampleParticles();
-    estimatePose();
+
+    if(localizationEnabled)
+    {
+        measurementUpdate();
+        resampleParticles();
+        estimatePose();
+    }
+
     emit publishLidar(copyOfLaserData);
     // update();//tento prikaz prinuti prekreslit obrazovku.. zavola sa paintEvent funkcia
 
     return 0;
+}
+
+void robot::setLocalizationEnabled(bool enabled)
+{
+    localizationEnabled = enabled;
+
+    if(enabled)
+    {
+        initializeParticles();
+    }
 }
 
 void robot::estimatePose()
@@ -949,7 +992,7 @@ void robot::measurementUpdate()
             error += distanceField[i][j];
         }
 
-        p.weight = exp(-error);
+        p.weight = exp(-0.1 * error);
 
         weightSum += p.weight;
     }

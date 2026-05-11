@@ -17,7 +17,7 @@ MainWindow::MainWindow(QWidget *parent) :
 {
 
     //tu je napevno nastavena ip. treba zmenit na to co ste si zadali do text boxu alebo nejaku inu pevnu. co bude spravna
-    ipaddress="192.168.1.12";//192.168.1.11toto je na niektory realny robot.. na lokal budete davat "127.0.0.1"
+    ipaddress="127.0.0.1";//192.168.1.11toto je na niektory realny robot.. na lokal budete davat "127.0.0.1"
 
     ui->setupUi(this);
     mapWidget = new MapWidget();
@@ -219,7 +219,7 @@ void MainWindow::on_pushButton_4_clicked() //stop
 
 }
 
-void MainWindow::on_pushButton_10_clicked() //stop
+void MainWindow::on_pushButton_10_clicked()
 {
     double targetX = ui->lineEdit_5->text().toDouble();
     double targetY = ui->lineEdit_6->text().toDouble();
@@ -227,7 +227,7 @@ void MainWindow::on_pushButton_10_clicked() //stop
     _robot.setTarget(targetX, targetY);
 }
 
-void MainWindow::on_pushButton_11_clicked() //stop
+void MainWindow::on_pushButton_11_clicked()
 {
     double goal_X = ui->lineEdit_8->text().toDouble();
     double goal_Y = ui->lineEdit_7->text().toDouble();
@@ -237,17 +237,23 @@ void MainWindow::on_pushButton_11_clicked() //stop
     _robot.planToGoal();
 }
 
-void MainWindow::on_pushButton_12_clicked() //stop
+void MainWindow::on_pushButton_12_clicked()
 {
     _robot.saveMap("mapa.txt");
 }
 
-void MainWindow::on_pushButton_13_clicked() //stop
+void MainWindow::on_pushButton_13_clicked()
 {
     _robot.loadMap("mapa.txt");
 
     updateLaserPicture = 1;
     update();
+}
+
+void MainWindow::on_pushButton_14_clicked()
+{
+    _robot.setLocalizationEnabled(true);
+
 }
 
 void MainWindow::on_pushButton_clicked()

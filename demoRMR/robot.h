@@ -64,6 +64,8 @@ public:
   Position interpolatePosition(uint32_t time);
 
   //monte carlo
+  void setLocalizationEnabled(bool enabled);
+
   struct Particle
   {
       double x;
@@ -155,6 +157,8 @@ private:
   bool isInsideGrid(int i, int j) const;
 
   //monte carlo
+  bool localizationEnabled;
+
   const std::vector<Particle>& getParticles() const;
   double a1;
   double a2;
