@@ -48,6 +48,7 @@ public:
 
       double weight;
   };
+  const std::vector<Particle>& getParticles() const;
   const std::vector<std::vector<double>>& getDistanceField() const;
   double getEstimatedX() const;
   double getEstimatedY() const;
@@ -111,13 +112,13 @@ private:
   double normalizeAngle(double a) const;
 
   //monte carlo
-  const std::vector<Particle>& getParticles() const;
+
   double a1;
   double a2;
   double a3;
   double a4;
-  std::vector<Particle> particles;
   int particleCount;
+  std::vector<Particle> particles;
   void initializeParticles();
   double prevOdomX;
   double prevOdomY;
@@ -132,6 +133,7 @@ private:
   double estimatedY;
   double estimatedFi;
   void estimatePose();
+  bool distanceFieldReady;
   /// toto su callbacky co sa sa volaju s novymi datami
   int processThisLidar(const std::vector<LaserData> &laserData);
   std::vector<std::pair<int,int>> freeGaps;

@@ -59,7 +59,7 @@ robot::robot(QObject *parent) : QObject(parent)
     obstacleMaxDist = 1.5;
     bestDirectionDeg = 0.0;
     //monte carlo
-    particleCount = 1000;
+    particleCount = 100;
     initializeParticles();
     a1 = 0.02;
     a2 = 0.02;
@@ -71,6 +71,7 @@ robot::robot(QObject *parent) : QObject(parent)
     estimatedX = 0.0;
     estimatedY = 0.0;
     estimatedFi = 0.0;
+    distanceFieldReady = false;
     qRegisterMetaType<LaserMeasurement>("LaserMeasurement");
 #ifndef DISABLE_OPENCV
     qRegisterMetaType<cv::Mat>("cv::Mat");
@@ -249,10 +250,33 @@ void robot::motionUpdate()
 
 void robot::computeDistanceField()
 {
+    bool obstacleFound = false;
+
     for(int i = 0; i < gridWidth; i++)
     {
         for(int j = 0; j < gridHeight; j++)
         {
+            if(grid[i][j] == 1)
+            {
+                obstacleFound = true;
+                break;
+            }
+        }
+
+        if(obstacleFound)
+            break;
+    }
+
+    if(!obstacleFound)
+        return;
+
+    int searchRadius = 20;
+
+    for(int i = 0; i < gridWidth; i++)
+    {
+        for(int j = 0; j < gridHeight; j++)
+        {
+            // prekážka -> vzdialenosť 0
             if(grid[i][j] == 1)
             {
                 distanceField[i][j] = 0.0;
@@ -261,9 +285,14 @@ void robot::computeDistanceField()
 
             double minDistSq = 1e9;
 
-            for(int x = 0; x < gridWidth; x++)
+            // lokálne hľadanie v okolí
+            for(int x = std::max(0, i - searchRadius);
+                 x < std::min(gridWidth, i + searchRadius);
+                 x++)
             {
-                for(int y = 0; y < gridHeight; y++)
+                for(int y = std::max(0, j - searchRadius);
+                     y < std::min(gridHeight, j + searchRadius);
+                     y++)
                 {
                     if(grid[x][y] == 1)
                     {
@@ -271,7 +300,7 @@ void robot::computeDistanceField()
                         double dy = j - y;
 
                         double distSq =
-                            dx*dx + dy*dy;
+                            dx * dx + dy * dy;
 
                         if(distSq < minDistSq)
                         {
@@ -285,6 +314,7 @@ void robot::computeDistanceField()
                 sqrt(minDistSq) * resolution;
         }
     }
+    distanceFieldReady = true;
 }
 
 const std::vector<std::vector<double>>& robot::getDistanceField() const
@@ -477,15 +507,6 @@ int robot::processThisRobot(const TKobukiData &robotdata)
         positionHistory.erase(positionHistory.begin());
     }
 
-    static int counter = 0;
-
-    counter++;
-
-    if(counter % 20 == 0)
-    {
-        computeDistanceField();
-    }
-
     motionUpdate();
     datacounter++;
     return 0;
@@ -583,9 +604,41 @@ int robot::processThisLidar(const std::vector<LaserData>& laserData)
         while (angleDeg < -180.0) angleDeg += 360.0;
 
     }
-    measurementUpdate();
-    resampleParticles();
-    estimatePose();
+    static bool computed = false;
+
+    if(!computed)
+    {
+        bool obstacleFound = false;
+
+        for(int i = 0; i < gridWidth; i++)
+        {
+            for(int j = 0; j < gridHeight; j++)
+            {
+                if(grid[i][j] == 1)
+                {
+                    obstacleFound = true;
+                    break;
+                }
+            }
+
+            if(obstacleFound)
+                break;
+        }
+
+        if(obstacleFound)
+        {
+            computeDistanceField();
+            computed = true;
+        }
+    }
+    if(!distanceField.empty())
+    {
+        //measurementUpdate();
+
+        //resampleParticles();
+
+        //estimatePose();
+    }
     emit publishLidar(copyOfLaserData);
     // update();//tento prikaz prinuti prekreslit obrazovku.. zavola sa paintEvent funkcia
 
@@ -667,8 +720,11 @@ void robot::measurementUpdate()
     {
         double error = 0.0;
 
-        for(const auto &point : copyOfLaserData)
+        for(int k = 0; k < copyOfLaserData.size(); k += 20)
         {
+            const auto &point = copyOfLaserData[k];
+
+
             double distance =
                 point.scanDistance / 1000.0;
 

@@ -30,11 +30,13 @@ void MapWidget::setEstimatedPose(
 }
 void MapWidget::paintEvent(QPaintEvent *)
 {
+
     QPainter painter(this);
 
     painter.fillRect(rect(), Qt::black);
 
     int cellSize = 2;
+
 
     for(int i=0; i<distanceField.size(); i++)
     {
