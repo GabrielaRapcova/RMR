@@ -56,6 +56,10 @@ robot::robot(QObject *parent) : QObject(parent)
     for(int i = 0; i < gridWidth; i++)
     {
         distanceField[i].resize(gridHeight);
+        for(int j = 0; j < gridHeight; j++)
+        {
+            distanceField[i][j] = 0.0;  // ADD THIS LINE
+        }
     }
     minDist = 0.23;
     maxDist = 3.0;
@@ -971,6 +975,12 @@ void robot::resampleParticles()
 
 void robot::measurementUpdate()
 {
+    // Add this check at the start
+    if(distanceField.empty() || distanceField[0].empty())
+    {
+        return;  // Can't do measurement update without distance field
+    }
+
     double weightSum = 0.0;
 
     for(auto &p : particles)
