@@ -37,6 +37,30 @@ public:
       double fi;
       uint32_t timestamp;
   };
+
+  //planning
+  struct Cell
+  {
+      int i;
+      int j;
+  };
+  void setGoal(double X, double Y);
+  void planToGoal();
+  void saveMap(const std::string& filename);
+  void loadMap(const std::string& filename);
+
+  const std::vector<Cell>& getPath() const;
+  const std::vector<Cell>& getMainPoints() const;
+  int getCurrentMainPoint() const { return currentMainPoint;}
+
+  double getResolution() const { return resolution; }
+  int getGridWidth() const { return gridWidth; }
+  int getGridHeight() const { return gridHeight; }
+
+  double getX() const;
+  double getY() const;
+  double getFi() const;
+
   Position interpolatePosition(uint32_t time);
 
   // tato funkcia len nastavuje hodnoty.. posielaju sa v callbacku(dobre, kvoli
@@ -87,6 +111,11 @@ private:
   std::vector<std::vector<int>> grid;
   std::vector<Position> positionHistory;
 
+  // grid for planning
+  std::vector<std::vector<int>> planGrid;
+  std::vector<Cell> path;
+  std::vector<Cell> mainpoints;
+
   int gridWidth;
   int gridHeight;
   double resolution;
@@ -95,6 +124,21 @@ private:
   double maxDist;
   void drawLine(int x0,int y0, int x1,int y1);
   double normalizeAngle(double a) const;
+
+  //planning
+  double goal_X;
+  double goal_Y;
+  int currentMainPoint;
+  bool followingPath;
+  bool mappingEnabled;
+
+  void floodFill(int goal_i, int goal_j);
+  std::vector<Cell> extractPath(int start_i, int start_j);
+  void inflateObstacles();
+
+  const int di8[8] = { 1, -1,  0,  0,  1,  1, -1, -1 };
+  const int dj8[8] = { 0,  0,  1, -1,  1, -1,  1, -1 };
+  bool isInsideGrid(int i, int j) const;
 
   /// toto su callbacky co sa sa volaju s novymi datami
   int processThisLidar(const std::vector<LaserData> &laserData);

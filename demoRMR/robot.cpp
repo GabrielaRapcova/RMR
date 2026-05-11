@@ -3,6 +3,8 @@
 // #include <iostream>
 #include <string>
 #include <vector>
+#include <queue>
+#include <fstream>
 
 robot::robot(QObject *parent) : QObject(parent)
 {
@@ -25,6 +27,12 @@ robot::robot(QObject *parent) : QObject(parent)
     resolution = 0.05;
     gridWidth = 14/resolution;
     gridHeight = 14/resolution;
+
+    //planning
+    goal_X = 0.0;
+    goal_Y = 0.0;
+    currentMainPoint = 0;
+    followingPath = false;
 
     grid.resize(gridWidth);
     for(int i = 0; i < gridWidth; i++)
@@ -51,6 +59,7 @@ robot::robot(QObject *parent) : QObject(parent)
     sectors.resize(sectorCount, 0);
     obstacleMaxDist = 1.5;
     bestDirectionDeg = 0.0;
+    mappingEnabled = true;
     qRegisterMetaType<LaserMeasurement>("LaserMeasurement");
 #ifndef DISABLE_OPENCV
     qRegisterMetaType<cv::Mat>("cv::Mat");
@@ -89,6 +98,12 @@ void robot::setTarget(double x, double y)
     rotateMode = true;
     w_actual = 0.0;
     v_actual = 0.0;
+}
+
+void robot::setGoal(double X, double Y)
+{
+    goal_X = X;
+    goal_Y = Y;
 }
 
 void robot::setSpeedVal(double forw, double rots)
@@ -172,6 +187,31 @@ int robot::processThisRobot(const TKobukiData &robotdata)
 
         if(distance < 0.01)
         {
+            if (followingPath)
+            {
+                currentMainPoint++;
+
+                if (currentMainPoint < mainpoints.size())
+                {
+                    Cell c = mainpoints[currentMainPoint];
+
+                    if (!isInsideGrid(c.i, c.j)) {
+                        followingPath = false;
+                        return 0;
+                    }
+
+                    double wx = (c.i - gridWidth / 2 + 0.5) * resolution;
+                    double wy = (c.j - gridHeight / 2 + 0.5) * resolution;
+
+                    setTarget(wx, wy);
+                    return 0;
+                }
+                else
+                {
+                    followingPath = false;
+                }
+            }
+
             hasTarget = false;
             rotateMode = false;
             v_target = 0.0;
@@ -307,6 +347,201 @@ double robot::normalizeAngle(double a) const
     return a;
 }
 
+bool robot::isInsideGrid(int i, int j) const
+{
+    return (i >= 0 && i < gridWidth &&
+            j >= 0 && j < gridHeight);
+}
+
+void robot::planToGoal()
+{
+    followingPath = false;
+    currentMainPoint = 0;
+
+    int start_i = int(round(x / resolution)) + gridWidth / 2;
+    int start_j = int(round(y / resolution)) + gridHeight / 2;
+
+    int goal_i = int(round(goal_X / resolution)) + gridWidth / 2;
+    int goal_j = int(round(goal_Y / resolution)) + gridHeight / 2;
+
+    if (!isInsideGrid(goal_i, goal_j))
+        return;
+
+    if (grid[goal_i][goal_j] == 1)
+        return;
+
+    floodFill(goal_i, goal_j);
+    path = extractPath(start_i, start_j);
+    qDebug() << "PATH size:" << path.size();
+
+    if (path.empty())
+        return;
+
+    mainpoints.clear();
+    mainpoints.push_back(path[0]);
+    qDebug() << "MAINPOINTS size:" << mainpoints.size();
+
+    for (int i = 1; i < path.size() - 1; i++)
+    {
+        int dx1 = path[i].i - path[i-1].i;
+        int dy1 = path[i].j - path[i-1].j;
+
+        int dx2 = path[i+1].i - path[i].i;
+        int dy2 = path[i+1].j - path[i].j;
+
+        if (dx1 != dx2 || dy1 != dy2)
+        {
+            mainpoints.push_back(path[i]);
+        }
+    }
+
+    mainpoints.push_back(path.back());
+
+    currentMainPoint = 0;
+    followingPath = true;
+
+    Cell c = mainpoints[currentMainPoint];
+    double wx = (c.i - gridWidth / 2 + 0.5) * resolution;
+    double wy = (c.j - gridHeight / 2 + 0.5) * resolution;
+
+    setTarget(wx, wy);
+}
+
+void robot::inflateObstacles()
+{
+    std::vector<std::vector<int>> inflated = planGrid;
+
+    int r = int((0.23) / resolution);
+
+    for (int i = 0; i < gridWidth; i++)
+    {
+        for (int j = 0; j < gridHeight; j++)
+        {
+            if (planGrid[i][j] == 1)
+            {
+                for (int dx = -r; dx <= r; dx++)
+                {
+                    for (int dy = -r; dy <= r; dy++)
+                    {
+                        int ni = i + dx;
+                        int nj = j + dy;
+
+                        if (!isInsideGrid(ni, nj))
+                            continue;
+
+                        double dist = sqrt(dx*dx + dy*dy);
+                        if (dist <= r)
+                        {
+                            inflated[ni][nj] = 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    planGrid = inflated;
+}
+
+
+void robot::floodFill(int goal_i, int goal_j)
+{
+
+    if (!isInsideGrid(goal_i, goal_j))
+        return;
+
+    planGrid = grid;
+    inflateObstacles();
+
+    if (planGrid[goal_i][goal_j] == 1)
+        return;
+
+    std::queue<Cell> q;
+
+    planGrid[goal_i][goal_j] = 2;
+    q.push({goal_i, goal_j});
+
+    while (!q.empty())
+    {
+        Cell c = q.front();
+        q.pop();
+
+        for (int k = 0; k < 8; k++)
+        {
+            int ni = c.i + di8[k];
+            int nj = c.j + dj8[k];
+
+            if (!isInsideGrid(ni, nj))
+                continue;
+
+            if (abs(di8[k]) == 1 && abs(dj8[k]) == 1)
+            {
+                if (planGrid[c.i + di8[k]][c.j] == 1 ||
+                    planGrid[c.i][c.j + dj8[k]] == 1)
+                    continue;
+            }
+
+            if (planGrid[ni][nj] == 0)
+            {
+                planGrid[ni][nj] = planGrid[c.i][c.j] + 1;
+                q.push({ni, nj});
+            }
+        }
+    }
+}
+
+std::vector<robot::Cell> robot::extractPath(int start_i, int start_j)
+{
+    std::vector<Cell> result;
+
+    if (planGrid[start_i][start_j] < 2)
+        return result;
+
+    if (!isInsideGrid(start_i, start_j))
+        return result;
+
+    int ci = start_i;
+    int cj = start_j;
+
+    result.push_back({ci, cj});
+
+    while (planGrid[ci][cj] > 2)
+    {
+        int best_i = ci;
+        int best_j = cj;
+        int best_val = planGrid[ci][cj];
+
+        if (!isInsideGrid(ci, cj))
+            break;
+
+        for (int k = 0; k < 8; k++)
+        {
+            int ni = ci + di8[k];
+            int nj = cj + dj8[k];
+
+            if (!isInsideGrid(ni, nj))
+                continue;
+
+            if (planGrid[ni][nj] >= 2 &&
+                planGrid[ni][nj] < best_val)
+            {
+                best_val = planGrid[ni][nj];
+                best_i = ni;
+                best_j = nj;
+            }
+        }
+
+        if (best_i == ci && best_j == cj)
+            break;
+
+        ci = best_i;
+        cj = best_j;
+        result.push_back({ci, cj});
+    }
+
+    return result;
+}
+
 robot::Position robot::interpolatePosition(uint32_t time)
 {
     if(positionHistory.size() < 2)
@@ -353,7 +588,7 @@ int robot::processThisLidar(const std::vector<LaserData>& laserData)
     int robot_j = (y / resolution) + gridHeight / 2;
 
     for (const auto& point : laserData)
-    {   
+    {
         if(positionHistory.size() < 2)
             continue;
         Position pos = interpolatePosition(point.timestamp);
@@ -377,14 +612,18 @@ int robot::processThisLidar(const std::vector<LaserData>& laserData)
         int i = (x_glob / resolution) + gridWidth / 2;
         int j = (y_glob / resolution) + gridHeight / 2;
 
-        if(i >= 0 && i < gridWidth && j >= 0 && j < gridHeight)
+        if(mappingEnabled)
         {
-            drawLine(robot_i, robot_j, i, j);
-            tempGrid[i][j]++;
-
-            if(tempGrid[i][j] >= 25)
+            if(i >= 0 && i < gridWidth && j >= 0 && j < gridHeight)
             {
-                grid[i][j] = 1;
+                drawLine(robot_i, robot_j, i, j);
+
+                tempGrid[i][j]++;
+
+                if(tempGrid[i][j] >= 25)
+                {
+                    grid[i][j] = 1;
+                }
             }
         }
 
@@ -437,10 +676,77 @@ void robot::drawLine(int x0, int y0, int x1, int y1)
     }
 }
 
+void robot::saveMap(const std::string& filename)
+{
+    std::ofstream file(filename);
+
+    if(!file.is_open())
+        return;
+
+    file << gridWidth << " " << gridHeight << std::endl;
+
+    for(int i = 0; i < gridWidth; i++)
+    {
+        for(int j = 0; j < gridHeight; j++)
+        {
+            file << grid[i][j] << " ";
+        }
+        file << std::endl;
+    }
+
+    file.close();
+
+    qDebug() << "MAP SAVED";
+}
+
+void robot::loadMap(const std::string& filename)
+{
+    std::ifstream file(filename);
+
+    if(!file.is_open())
+        return;
+
+    int w,h;
+
+    file >> w >> h;
+
+    if(w != gridWidth || h != gridHeight)
+    {
+        qDebug() << "WRONG MAP SIZE";
+        return;
+    }
+
+    for(int i = 0; i < gridWidth; i++)
+    {
+        for(int j = 0; j < gridHeight; j++)
+        {
+            file >> grid[i][j];
+        }
+    }
+
+    file.close();
+
+    mappingEnabled = false;
+    qDebug() << "MAP LOADED";
+}
+
 const std::vector<std::vector<int>>& robot::getGrid() const
 {
     return grid;
 }
+
+const std::vector<robot::Cell>& robot::getPath() const
+{
+    return path;
+}
+
+const std::vector<robot::Cell>& robot::getMainPoints() const
+{
+    return mainpoints;
+}
+double robot::getX() const { return x; }
+double robot::getY() const { return y; }
+double robot::getFi() const { return fi; }
 
 #ifndef DISABLE_OPENCV
 ///toto je calback na data z kamery, ktory ste podhodili robotu vo funkcii initAndStartRobot

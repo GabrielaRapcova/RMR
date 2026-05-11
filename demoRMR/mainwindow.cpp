@@ -17,7 +17,7 @@ MainWindow::MainWindow(QWidget *parent) :
 {
 
     //tu je napevno nastavena ip. treba zmenit na to co ste si zadali do text boxu alebo nejaku inu pevnu. co bude spravna
-    ipaddress="127.0.0.1";//192.168.1.11toto je na niektory realny robot.. na lokal budete davat "127.0.0.1"
+    ipaddress="192.168.1.12";//192.168.1.11toto je na niektory realny robot.. na lokal budete davat "127.0.0.1"
 
     ui->setupUi(this);
     mapWidget = new MapWidget();
@@ -95,6 +95,36 @@ void MainWindow::paintEvent(QPaintEvent *event)
                 if(rect.contains(xp,yp))//ak je bod vo vnutri nasho obdlznika tak iba vtedy budem chciet kreslit
                     painter.drawEllipse(QPoint(xp, yp),2,2);
             }
+        }
+
+        const auto& pts = _robot.getMainPoints();
+        int idx = _robot.getCurrentMainPoint();
+
+        if (idx < pts.size())
+        {
+            auto c = pts[idx];
+
+            double wx = (c.i - _robot.getGridWidth()/2) * _robot.getResolution();
+            double wy = (c.j - _robot.getGridHeight()/2) * _robot.getResolution();
+            double rx = _robot.getX();
+            double ry = _robot.getY();
+            double fi = _robot.getFi();
+
+            double dx = wx - rx;
+            double dy = wy - ry;
+
+            double xr =  cos(fi) * dx + sin(fi) * dy;
+            double yr = -sin(fi) * dx + cos(fi) * dy;
+
+            int px = rect.width()/2  + rect.topLeft().x() + xr * 50;
+            int py = rect.height()/2 + rect.topLeft().y() - yr * 50;
+
+            QPen pathPen(Qt::red);
+            pathPen.setWidth(8);
+            painter.setPen(pathPen);
+
+            if (rect.contains(px, py))
+                painter.drawEllipse(QPoint(px, py), 6, 6);
         }
     }
 #ifndef DISABLE_SKELETON
@@ -195,10 +225,30 @@ void MainWindow::on_pushButton_10_clicked() //stop
     double targetY = ui->lineEdit_6->text().toDouble();
 
     _robot.setTarget(targetX, targetY);
-
 }
 
+void MainWindow::on_pushButton_11_clicked() //stop
+{
+    double goal_X = ui->lineEdit_8->text().toDouble();
+    double goal_Y = ui->lineEdit_7->text().toDouble();
 
+
+    _robot.setGoal(goal_X, goal_Y);
+    _robot.planToGoal();
+}
+
+void MainWindow::on_pushButton_12_clicked() //stop
+{
+    _robot.saveMap("mapa.txt");
+}
+
+void MainWindow::on_pushButton_13_clicked() //stop
+{
+    _robot.loadMap("mapa.txt");
+
+    updateLaserPicture = 1;
+    update();
+}
 
 void MainWindow::on_pushButton_clicked()
 {

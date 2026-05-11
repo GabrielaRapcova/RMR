@@ -37,4 +37,5 @@ void MapWidget::paintEvent(QPaintEvent *)
             }
         }
     }
+
 }
