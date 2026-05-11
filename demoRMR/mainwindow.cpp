@@ -257,8 +257,11 @@ void MainWindow::on_pushButton_13_clicked()
 
 void MainWindow::on_pushButton_14_clicked()
 {
-    _robot.setLocalizationEnabled(true);
-
+    // Only enable if we have a map with obstacles
+    if(!_robot.getGrid().empty() && _robot.getDistanceField().size() > 0)
+    {
+        _robot.setLocalizationEnabled(true);
+    }
 }
 
 void MainWindow::on_pushButton_clicked()
