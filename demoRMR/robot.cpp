@@ -71,11 +71,11 @@ robot::robot(QObject *parent) : QObject(parent)
     //monte carlo
     localizationEnabled = false;
 
-    particleCount = 100;
-    a1 = 0.02;
-    a2 = 0.02;
-    a3 = 0.02;
-    a4 = 0.02;
+    particleCount = 500;
+    a1 = 0.05;
+    a2 = 0.05;
+    a3 = 0.1;
+    a4 = 0.05;
     prevOdomX = x;
     prevOdomY = y;
     prevOdomFi = fi;
@@ -553,8 +553,6 @@ int robot::processThisRobot(const TKobukiData &robotdata)
     {
         computeDistanceField();
     }
-
-    motionUpdate();
     datacounter++;
     return 0;
 }
@@ -851,12 +849,16 @@ int robot::processThisLidar(const std::vector<LaserData>& laserData)
 
     }
 
+
     if(localizationEnabled)
     {
+        computeDistanceField();
         measurementUpdate();
         resampleParticles();
+        motionUpdate();
         estimatePose();
     }
+
 
     emit publishLidar(copyOfLaserData);
     // update();//tento prikaz prinuti prekreslit obrazovku.. zavola sa paintEvent funkcia
@@ -894,8 +896,11 @@ void robot::estimatePose()
             p.weight * cos(p.fi);
     }
 
-    estimatedX = sumX;
-    estimatedY = sumY;
+    if(!particles.empty())
+    {
+        estimatedX = sumX;
+        estimatedY = sumY;
+    }
 
     estimatedFi =
         atan2(sumSin, sumCos);
@@ -915,19 +920,42 @@ void robot::resampleParticles()
         cumulative.push_back(sum);
     }
 
+    double random_ratio = 0.1;
+
     for(int i = 0; i < particleCount; i++)
     {
-        double r =
-            ((double)rand() / RAND_MAX) * sum;
-
-        for(int j = 0; j < particles.size(); j++)
+        if(((double)rand() / RAND_MAX) < random_ratio)
         {
-            if(r <= cumulative[j])
-            {
-                newParticles.push_back(
-                    particles[j]);
+            Particle p;
 
-                break;
+            while(true)
+            {
+                int ii = rand() % gridWidth;
+                int jj = rand() % gridHeight;
+
+                if(grid[ii][jj] == 0)
+                {
+                    p.x = (ii - gridWidth / 2) * resolution;
+                    p.y = (jj - gridHeight / 2) * resolution;
+                    p.fi = ((double)rand() / RAND_MAX) * 2.0 * M_PI;
+                    p.weight = 1.0 / particleCount;
+                    break;
+                }
+            }
+
+            newParticles.push_back(p);
+        }
+        else
+        {
+            double r = ((double)rand() / RAND_MAX) * sum;
+
+            for(int j = 0; j < particles.size(); j++)
+            {
+                if(r <= cumulative[j])
+                {
+                    newParticles.push_back(particles[j]);
+                    break;
+                }
             }
         }
     }
@@ -949,38 +977,26 @@ void robot::measurementUpdate()
     {
         double error = 0.0;
 
-        for(const auto &point : copyOfLaserData)
+        for(int idx = 0; idx < copyOfLaserData.size(); idx += 5)
         {
-            double distance =
-                point.scanDistance / 1000.0;
+            const auto &point = copyOfLaserData[idx];
+
+            double distance = point.scanDistance / 1000.0;
 
             if(distance <= minDist ||
-                distance > maxDist)
+                distance > maxDist ||
+                (distance >= 0.6 && distance <= 0.7))
             {
                 continue;
             }
 
-            double angle =
-                -point.scanAngle *
-                M_PI / 180.0;
+            double angle = -point.scanAngle * M_PI / 180.0;
 
-            double hitX =
-                p.x +
-                distance *
-                    cos(p.fi + angle);
+            double hitX = p.x + distance * cos(p.fi + angle);
+            double hitY = p.y + distance * sin(p.fi + angle);
 
-            double hitY =
-                p.y +
-                distance *
-                    sin(p.fi + angle);
-
-            int i =
-                hitX / resolution +
-                gridWidth / 2;
-
-            int j =
-                hitY / resolution +
-                gridHeight / 2;
+            int i = hitX / resolution + gridWidth / 2;
+            int j = hitY / resolution + gridHeight / 2;
 
             if(i < 0 || i >= gridWidth ||
                 j < 0 || j >= gridHeight)
@@ -989,20 +1005,25 @@ void robot::measurementUpdate()
                 continue;
             }
 
-            error += distanceField[i][j];
+            double dist = distanceField[i][j];
+
+            error += dist * dist;
         }
 
-        p.weight = exp(-0.1 * error);
+        p.weight = exp(-0.005 * error);
 
         weightSum += p.weight;
     }
 
-    if(weightSum > 0.0)
+    if(weightSum == 0.0)
     {
         for(auto &p : particles)
-        {
+            p.weight = 1.0 / particleCount;
+    }
+    else
+    {
+        for(auto &p : particles)
             p.weight /= weightSum;
-        }
     }
 }
 void robot::drawLine(int x0, int y0, int x1, int y1)
@@ -1095,6 +1116,7 @@ void robot::loadMap(const std::string& filename)
     file.close();
 
     mappingEnabled = false;
+    computeDistanceField();
     qDebug() << "MAP LOADED";
 }
 
