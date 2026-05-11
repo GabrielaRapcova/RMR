@@ -71,7 +71,7 @@ robot::robot(QObject *parent) : QObject(parent)
     //monte carlo
     localizationEnabled = false;
 
-    particleCount = 1000;
+    particleCount = 100;
     a1 = 0.02;
     a2 = 0.02;
     a3 = 0.02;

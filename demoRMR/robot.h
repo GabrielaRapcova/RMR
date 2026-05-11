@@ -74,6 +74,7 @@ public:
 
       double weight;
   };
+  const std::vector<Particle>& getParticles() const;
   const std::vector<std::vector<double>>& getDistanceField() const;
   double getEstimatedX() const;
   double getEstimatedY() const;
@@ -158,8 +159,6 @@ private:
 
   //monte carlo
   bool localizationEnabled;
-
-  const std::vector<Particle>& getParticles() const;
   double a1;
   double a2;
   double a3;

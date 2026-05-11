@@ -71,6 +71,11 @@ void MainWindow::paintEvent(QPaintEvent *event)
             const auto &grid = _robot.getGrid();
             mapWidget->setGrid(grid);
 
+            mapWidget->setDistanceField(
+                _robot.getDistanceField());
+
+            mapWidget->setParticles(
+                _robot.getParticles());
             int cellSize = 2; // veľkosť bunky mapy
 
             QPen gridPen;
