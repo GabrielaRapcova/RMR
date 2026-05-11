@@ -30,8 +30,10 @@ void MapWidget::setEstimatedPose(
 }
 void MapWidget::paintEvent(QPaintEvent *)
 {
-    /*if(distanceField.empty())
-        return;*/
+    // Check both are not empty
+    if(distanceField.empty() || gridData.empty() || gridData[0].empty())
+        return;
+
     QPainter painter(this);
 
     painter.fillRect(rect(), Qt::black);
