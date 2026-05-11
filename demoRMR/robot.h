@@ -63,6 +63,20 @@ public:
 
   Position interpolatePosition(uint32_t time);
 
+  //monte carlo
+  struct Particle
+  {
+      double x;
+      double y;
+      double fi;
+
+      double weight;
+  };
+  const std::vector<std::vector<double>>& getDistanceField() const;
+  double getEstimatedX() const;
+  double getEstimatedY() const;
+  double getEstimatedFi() const;
+
   // tato funkcia len nastavuje hodnoty.. posielaju sa v callbacku(dobre, kvoli
   // asynchronnosti a zabezpeceniu,ze sa poslu len raz pri viacero prepisoch
   // vramci callu)
@@ -140,6 +154,28 @@ private:
   const int dj8[8] = { 0,  0,  1, -1,  1, -1,  1, -1 };
   bool isInsideGrid(int i, int j) const;
 
+  //monte carlo
+  const std::vector<Particle>& getParticles() const;
+  double a1;
+  double a2;
+  double a3;
+  double a4;
+  std::vector<Particle> particles;
+  int particleCount;
+  void initializeParticles();
+  double prevOdomX;
+  double prevOdomY;
+  double prevOdomFi;
+  void motionUpdate();
+  double sampleNormal(double variance);
+  std::vector<std::vector<double>> distanceField;
+  void computeDistanceField();
+  void measurementUpdate();
+  void resampleParticles();
+  double estimatedX;
+  double estimatedY;
+  double estimatedFi;
+  void estimatePose();
   /// toto su callbacky co sa sa volaju s novymi datami
   int processThisLidar(const std::vector<LaserData> &laserData);
   std::vector<std::pair<int,int>> freeGaps;

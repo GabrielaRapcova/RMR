@@ -50,6 +50,13 @@ robot::robot(QObject *parent) : QObject(parent)
             tempGrid[i][j] = 0;
         }
     }
+
+    distanceField.resize(gridWidth);
+
+    for(int i = 0; i < gridWidth; i++)
+    {
+        distanceField[i].resize(gridHeight);
+    }
     minDist = 0.23;
     maxDist = 3.0;
 
@@ -60,6 +67,19 @@ robot::robot(QObject *parent) : QObject(parent)
     obstacleMaxDist = 1.5;
     bestDirectionDeg = 0.0;
     mappingEnabled = true;
+    //monte carlo
+    particleCount = 1000;
+    initializeParticles();
+    a1 = 0.02;
+    a2 = 0.02;
+    a3 = 0.02;
+    a4 = 0.02;
+    prevOdomX = x;
+    prevOdomY = y;
+    prevOdomFi = fi;
+    estimatedX = 0.0;
+    estimatedY = 0.0;
+    estimatedFi = 0.0;
     qRegisterMetaType<LaserMeasurement>("LaserMeasurement");
 #ifndef DISABLE_OPENCV
     qRegisterMetaType<cv::Mat>("cv::Mat");
@@ -124,6 +144,167 @@ void robot::setSpeed(double forw, double rots)
     else
         robotCom.setTranslationSpeed(0);
     useDirectCommands=1;
+}
+void robot::initializeParticles()
+{
+    particles.clear();
+
+    for(int k = 0; k < particleCount; k++)
+    {
+        Particle p;
+
+        while(true)
+        {
+            int i = rand() % gridWidth;
+            int j = rand() % gridHeight;
+
+            if(grid[i][j] == 0)
+            {
+                p.x = (i - gridWidth / 2) * resolution;
+                p.y = (j - gridHeight / 2) * resolution;
+
+                break;
+            }
+        }
+
+        p.fi = ((double)rand() / RAND_MAX) * 2.0 * M_PI;
+
+        p.weight = 1.0 / particleCount;
+
+        particles.push_back(p);
+    }
+}
+
+const std::vector<robot::Particle>& robot::getParticles() const
+{
+    return particles;
+}
+double robot::getEstimatedX() const
+{
+    return estimatedX;
+}
+
+double robot::getEstimatedY() const
+{
+    return estimatedY;
+}
+
+double robot::getEstimatedFi() const
+{
+    return estimatedFi;
+}
+
+double robot::sampleNormal(double variance)
+{
+    double u1 = ((double)rand() + 1.0) / ((double)RAND_MAX + 1.0);
+    double u2 = ((double)rand() + 1.0) / ((double)RAND_MAX + 1.0);
+
+    double z =
+        sqrt(-2.0 * log(u1)) *
+        cos(2.0 * M_PI * u2);
+
+    return z * sqrt(variance);
+}
+
+void robot::motionUpdate()
+{
+    double dx = x - prevOdomX;
+    double dy = y - prevOdomY;
+
+    double trans =
+        sqrt(dx*dx + dy*dy);
+
+    double rot1 =
+        atan2(dy, dx) - prevOdomFi;
+
+    double rot2 =
+        fi - prevOdomFi - rot1;
+
+    rot1 = normalizeAngle(rot1);
+    rot2 = normalizeAngle(rot2);
+
+    for(auto &p : particles)
+    {
+        double rot1_hat =
+            rot1 -
+            sampleNormal(
+                a1 * rot1 * rot1 +
+                a2 * trans * trans);
+
+        double trans_hat =
+            trans -
+            sampleNormal(
+                a3 * trans * trans +
+                a4 * rot1 * rot1 +
+                a4 * rot2 * rot2);
+
+        double rot2_hat =
+            rot2 -
+            sampleNormal(
+                a1 * rot2 * rot2 +
+                a2 * trans * trans);
+
+        p.x +=
+            trans_hat *
+            cos(p.fi + rot1_hat);
+
+        p.y +=
+            trans_hat *
+            sin(p.fi + rot1_hat);
+
+        p.fi += rot1_hat + rot2_hat;
+
+        p.fi = normalizeAngle(p.fi);
+    }
+
+    prevOdomX = x;
+    prevOdomY = y;
+    prevOdomFi = fi;
+}
+
+void robot::computeDistanceField()
+{
+    for(int i = 0; i < gridWidth; i++)
+    {
+        for(int j = 0; j < gridHeight; j++)
+        {
+            if(grid[i][j] == 1)
+            {
+                distanceField[i][j] = 0.0;
+                continue;
+            }
+
+            double minDistSq = 1e9;
+
+            for(int x = 0; x < gridWidth; x++)
+            {
+                for(int y = 0; y < gridHeight; y++)
+                {
+                    if(grid[x][y] == 1)
+                    {
+                        double dx = i - x;
+                        double dy = j - y;
+
+                        double distSq =
+                            dx*dx + dy*dy;
+
+                        if(distSq < minDistSq)
+                        {
+                            minDistSq = distSq;
+                        }
+                    }
+                }
+            }
+
+            distanceField[i][j] =
+                sqrt(minDistSq) * resolution;
+        }
+    }
+}
+
+const std::vector<std::vector<double>>& robot::getDistanceField() const
+{
+    return distanceField;
 }
 
 ///toto je calback na data z robota, ktory ste podhodili robotu vo funkcii initAndStartRobot
@@ -336,6 +517,16 @@ int robot::processThisRobot(const TKobukiData &robotdata)
         positionHistory.erase(positionHistory.begin());
     }
 
+    static int counter = 0;
+
+    counter++;
+
+    if(counter % 20 == 0)
+    {
+        computeDistanceField();
+    }
+
+    motionUpdate();
     datacounter++;
     return 0;
 }
@@ -631,12 +822,146 @@ int robot::processThisLidar(const std::vector<LaserData>& laserData)
         while (angleDeg < -180.0) angleDeg += 360.0;
 
     }
+    measurementUpdate();
+    resampleParticles();
+    estimatePose();
     emit publishLidar(copyOfLaserData);
     // update();//tento prikaz prinuti prekreslit obrazovku.. zavola sa paintEvent funkcia
 
     return 0;
 }
 
+void robot::estimatePose()
+{
+    double sumX = 0.0;
+    double sumY = 0.0;
+
+    double sumSin = 0.0;
+    double sumCos = 0.0;
+
+    for(const auto &p : particles)
+    {
+        sumX += p.weight * p.x;
+        sumY += p.weight * p.y;
+
+        sumSin +=
+            p.weight * sin(p.fi);
+
+        sumCos +=
+            p.weight * cos(p.fi);
+    }
+
+    estimatedX = sumX;
+    estimatedY = sumY;
+
+    estimatedFi =
+        atan2(sumSin, sumCos);
+}
+
+void robot::resampleParticles()
+{
+    std::vector<Particle> newParticles;
+
+    std::vector<double> cumulative;
+
+    double sum = 0.0;
+
+    for(const auto &p : particles)
+    {
+        sum += p.weight;
+        cumulative.push_back(sum);
+    }
+
+    for(int i = 0; i < particleCount; i++)
+    {
+        double r =
+            ((double)rand() / RAND_MAX) * sum;
+
+        for(int j = 0; j < particles.size(); j++)
+        {
+            if(r <= cumulative[j])
+            {
+                newParticles.push_back(
+                    particles[j]);
+
+                break;
+            }
+        }
+    }
+
+    particles = newParticles;
+
+    for(auto &p : particles)
+    {
+        p.weight =
+            1.0 / particleCount;
+    }
+}
+
+void robot::measurementUpdate()
+{
+    double weightSum = 0.0;
+
+    for(auto &p : particles)
+    {
+        double error = 0.0;
+
+        for(const auto &point : copyOfLaserData)
+        {
+            double distance =
+                point.scanDistance / 1000.0;
+
+            if(distance <= minDist ||
+                distance > maxDist)
+            {
+                continue;
+            }
+
+            double angle =
+                -point.scanAngle *
+                M_PI / 180.0;
+
+            double hitX =
+                p.x +
+                distance *
+                    cos(p.fi + angle);
+
+            double hitY =
+                p.y +
+                distance *
+                    sin(p.fi + angle);
+
+            int i =
+                hitX / resolution +
+                gridWidth / 2;
+
+            int j =
+                hitY / resolution +
+                gridHeight / 2;
+
+            if(i < 0 || i >= gridWidth ||
+                j < 0 || j >= gridHeight)
+            {
+                error += 5.0;
+                continue;
+            }
+
+            error += distanceField[i][j];
+        }
+
+        p.weight = exp(-error);
+
+        weightSum += p.weight;
+    }
+
+    if(weightSum > 0.0)
+    {
+        for(auto &p : particles)
+        {
+            p.weight /= weightSum;
+        }
+    }
+}
 void robot::drawLine(int x0, int y0, int x1, int y1)
 {
     int dx = abs(x1 - x0);
