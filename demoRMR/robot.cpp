@@ -551,13 +551,6 @@ int robot::processThisRobot(const TKobukiData &robotdata)
         computeDistanceField();
     }
 
-    motionUpdate();
-
-    if(localizationEnabled)
-    {
-        estimatePose();
-    }
-
     datacounter++;
     return 0;
 }
@@ -1013,7 +1006,6 @@ void robot::measurementUpdate()
             double dist = distanceField[i][j];
 
             error += dist * dist;
-            error += 0.05 * fabs(angle);
         }
 
         if(error > 1000) error = 1000;
