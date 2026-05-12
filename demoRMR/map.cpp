@@ -28,9 +28,10 @@ void MapWidget::setEstimatedPose(
 
     update();
 }
+
 void MapWidget::paintEvent(QPaintEvent *)
 {
-    if(distanceField.empty() || gridData.empty() || gridData[0].empty())
+    if(gridData.empty())
         return;
 
     QPainter painter(this);
@@ -38,31 +39,38 @@ void MapWidget::paintEvent(QPaintEvent *)
     painter.fillRect(rect(), Qt::black);
 
     int cellSize = 2;
+    double resolution = 0.05;
 
-    for(int i=0; i<distanceField.size(); i++)
+    if(!distanceField.empty() &&
+        distanceField.size() == gridData.size() &&
+        distanceField[0].size() == gridData[0].size())
     {
-        for(int j=0; j<distanceField[i].size(); j++)
+        for(int i = 0; i < static_cast<int>(distanceField.size()); i++)
         {
-            double d = distanceField[i][j];
+            for(int j = 0; j < static_cast<int>(distanceField[i].size()); j++)
+            {
+                double d = distanceField[i][j];
 
-            int gray =
-                std::min(255,
-                         (int)(d * 40));
+                int gray =
+                    std::min(255,
+                             static_cast<int>(d * 40));
 
-            painter.fillRect(
-                i * cellSize,
-                j * cellSize,
-                cellSize,
-                cellSize,
-                QColor(gray, gray, gray));
+                painter.fillRect(
+                    i * cellSize,
+                    j * cellSize,
+                    cellSize,
+                    cellSize,
+                    QColor(gray, gray, gray));
+            }
         }
     }
 
     painter.setPen(Qt::white);
+    painter.setBrush(Qt::white);
 
-    for(int i=0; i<gridData.size(); i++)
+    for(int i = 0; i < static_cast<int>(gridData.size()); i++)
     {
-        for(int j=0; j<gridData[i].size(); j++)
+        for(int j = 0; j < static_cast<int>(gridData[i].size()); j++)
         {
             if(gridData[i][j] == 1)
             {
@@ -78,12 +86,15 @@ void MapWidget::paintEvent(QPaintEvent *)
     painter.setPen(Qt::red);
     painter.setBrush(Qt::red);
 
-    double resolution = 0.05;
-
     for(const auto& p : particles)
     {
-        int grid_i = static_cast<int>(p.x / resolution) + static_cast<int>(gridData.size()) / 2;
-        int grid_j = static_cast<int>(p.y / resolution) + static_cast<int>(gridData[0].size()) / 2;
+        int grid_i =
+            static_cast<int>(p.x / resolution) +
+            static_cast<int>(gridData.size()) / 2;
+
+        int grid_j =
+            static_cast<int>(p.y / resolution) +
+            static_cast<int>(gridData[0].size()) / 2;
 
         if(grid_i < 0 || grid_i >= static_cast<int>(gridData.size()) ||
             grid_j < 0 || grid_j >= static_cast<int>(gridData[0].size()))
@@ -100,37 +111,24 @@ void MapWidget::paintEvent(QPaintEvent *)
     painter.setPen(Qt::green);
     painter.setBrush(Qt::green);
 
-    int ex =
-        (estimatedX / 0.05 +
-         gridData.size()/2) * cellSize;
+    int ex_grid =
+        static_cast<int>(estimatedX / resolution) +
+        static_cast<int>(gridData.size()) / 2;
 
-    int ey =
-        (estimatedY / 0.05 +
-         gridData[0].size()/2) * cellSize;
+    int ey_grid =
+        static_cast<int>(estimatedY / resolution) +
+        static_cast<int>(gridData[0].size()) / 2;
 
-    painter.drawEllipse(
-        QPoint(ex, ey),
-        5,
-        5);
+    if(ex_grid >= 0 && ex_grid < static_cast<int>(gridData.size()) &&
+        ey_grid >= 0 && ey_grid < static_cast<int>(gridData[0].size()))
+    {
+        int ex = ex_grid * cellSize;
+        int ey = ey_grid * cellSize;
 
-    int lineLength = 15;
-
-    int endX =
-        ex +
-        lineLength *
-            cos(estimatedFi);
-
-    int endY =
-        ey +
-        lineLength *
-            sin(estimatedFi);
-
-    painter.drawLine(
-        ex,
-        ey,
-        endX,
-        endY);
+        painter.drawEllipse(QPoint(ex, ey), 5, 5);
+    }
 }
+
 void MapWidget::setDistanceField(
     const std::vector<std::vector<double>>& df)
 {

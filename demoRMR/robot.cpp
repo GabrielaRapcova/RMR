@@ -151,6 +151,7 @@ void robot::setSpeed(double forw, double rots)
         robotCom.setTranslationSpeed(0);
     useDirectCommands=1;
 }
+
 void robot::initializeParticles()
 {
     particles.clear();
@@ -159,21 +160,13 @@ void robot::initializeParticles()
     {
         Particle p;
 
-        while(true)
-        {
-            int i = rand() % gridWidth;
-            int j = rand() % gridHeight;
+        double noise_x = (((double)rand() / RAND_MAX) - 0.5) * 1.0;
+        double noise_y = (((double)rand() / RAND_MAX) - 0.5) * 1.0;
+        double noise_fi = (((double)rand() / RAND_MAX) - 0.5) * M_PI / 2;
 
-            if(grid[i][j] == 0)
-            {
-                p.x = (i - gridWidth / 2) * resolution;
-                p.y = (j - gridHeight / 2) * resolution;
-
-                break;
-            }
-        }
-
-        p.fi = ((double)rand() / RAND_MAX) * 2.0 * M_PI;
+        p.x = x + noise_x;
+        p.y = y + noise_y;
+        p.fi = fi + noise_fi;
 
         p.weight = 1.0 / particleCount;
 
@@ -557,6 +550,14 @@ int robot::processThisRobot(const TKobukiData &robotdata)
     {
         computeDistanceField();
     }
+
+    motionUpdate();
+
+    if(localizationEnabled)
+    {
+        estimatePose();
+    }
+
     datacounter++;
     return 0;
 }
@@ -893,11 +894,8 @@ void robot::estimatePose()
         sumX += p.weight * p.x;
         sumY += p.weight * p.y;
 
-        sumSin +=
-            p.weight * sin(p.fi);
-
-        sumCos +=
-            p.weight * cos(p.fi);
+        sumSin += p.weight * sin(p.fi);
+        sumCos += p.weight * cos(p.fi);
     }
 
     if(!particles.empty())
@@ -906,14 +904,12 @@ void robot::estimatePose()
         estimatedY = sumY;
     }
 
-    estimatedFi =
-        atan2(sumSin, sumCos);
+    estimatedFi = atan2(sumSin, sumCos);
 }
 
 void robot::resampleParticles()
 {
     std::vector<Particle> newParticles;
-
     std::vector<double> cumulative;
 
     double sum = 0.0;
@@ -968,8 +964,7 @@ void robot::resampleParticles()
 
     for(auto &p : particles)
     {
-        p.weight =
-            1.0 / particleCount;
+        p.weight = 1.0 / particleCount;
     }
 }
 
@@ -1018,7 +1013,6 @@ void robot::measurementUpdate()
             double dist = distanceField[i][j];
 
             error += dist * dist;
-
             error += 0.05 * fabs(angle);
         }
 
