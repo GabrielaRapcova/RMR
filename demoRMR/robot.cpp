@@ -913,7 +913,16 @@ void robot::resampleParticles()
         cumulative.push_back(sum);
     }
 
-    double random_ratio = 0.05;
+    double random_ratio;
+
+    if(sum < 0.3)
+    {
+        random_ratio = 0.05;
+    }
+    else
+    {
+        random_ratio = 0.005;
+    }
 
     for(int i = 0; i < particleCount; i++)
     {
