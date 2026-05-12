@@ -839,9 +839,9 @@ int robot::processThisLidar(const std::vector<LaserData>& laserData)
     if(localizationEnabled)
     {
         computeDistanceField();
+        motionUpdate();
         measurementUpdate();
         resampleParticles();
-        motionUpdate();
         estimatePose();
     }
 
