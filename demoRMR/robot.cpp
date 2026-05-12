@@ -76,10 +76,10 @@ robot::robot(QObject *parent) : QObject(parent)
     localizationEnabled = false;
 
     particleCount = 500;
-    a1 = 0.05;
-    a2 = 0.05;
-    a3 = 0.1;
-    a4 = 0.05;
+    a1 = 0.01;
+    a2 = 0.01;
+    a3 = 0.02;
+    a4 = 0.01;
     prevOdomX = x;
     prevOdomY = y;
     prevOdomFi = fi;
@@ -160,9 +160,9 @@ void robot::initializeParticles()
     {
         Particle p;
 
-        double noise_x = (((double)rand() / RAND_MAX) - 0.5) * 1.0;
-        double noise_y = (((double)rand() / RAND_MAX) - 0.5) * 1.0;
-        double noise_fi = (((double)rand() / RAND_MAX) - 0.5) * M_PI / 2;
+        double noise_x = (((double)rand() / RAND_MAX) - 0.5) * 0.2;
+        double noise_y = (((double)rand() / RAND_MAX) - 0.5) * 0.2;
+        double noise_fi = (((double)rand() / RAND_MAX) - 0.5) * M_PI / 8;
 
         p.x = x + noise_x;
         p.y = y + noise_y;
