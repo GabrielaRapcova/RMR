@@ -160,8 +160,8 @@ void robot::initializeParticles()
     {
         Particle p;
 
-        double noise_x = (((double)rand() / RAND_MAX) - 0.5) * 0.2;
-        double noise_y = (((double)rand() / RAND_MAX) - 0.5) * 0.2;
+        double noise_x = (((double)rand() / RAND_MAX) - 0.5) * 0.3;
+        double noise_y = (((double)rand() / RAND_MAX) - 0.5) * 0.3;
         double noise_fi = (((double)rand() / RAND_MAX) - 0.5) * M_PI / 8;
 
         p.x = x + noise_x;
@@ -210,14 +210,9 @@ void robot::motionUpdate()
     double dx = x - prevOdomX;
     double dy = y - prevOdomY;
 
-    double trans =
-        sqrt(dx*dx + dy*dy);
-
-    double rot1 =
-        atan2(dy, dx) - prevOdomFi;
-
-    double rot2 =
-        fi - prevOdomFi - rot1;
+    double trans = sqrt(dx*dx + dy*dy);
+    double rot1 = atan2(dy, dx) - prevOdomFi;
+    double rot2 = fi - prevOdomFi - rot1;
 
     rot1 = normalizeAngle(rot1);
     rot2 = normalizeAngle(rot2);
@@ -243,13 +238,8 @@ void robot::motionUpdate()
                 a1 * rot2 * rot2 +
                 a2 * trans * trans);
 
-        p.x +=
-            trans_hat *
-            cos(p.fi + rot1_hat);
-
-        p.y +=
-            trans_hat *
-            sin(p.fi + rot1_hat);
+        p.x += trans_hat * cos(p.fi + rot1_hat);
+        p.y += trans_hat * sin(p.fi + rot1_hat);
 
         p.fi += rot1_hat + rot2_hat;
 
@@ -310,8 +300,7 @@ void robot::computeDistanceField()
                         double dx = i - x;
                         double dy = j - y;
 
-                        double distSq =
-                            dx * dx + dy * dy;
+                        double distSq = dx * dx + dy * dy;
 
                         if(distSq < minDistSq)
                         {
@@ -321,8 +310,7 @@ void robot::computeDistanceField()
                 }
             }
 
-            distanceField[i][j] =
-                sqrt(minDistSq) * resolution;
+            distanceField[i][j] = sqrt(minDistSq) * resolution;
         }
     }
 }
@@ -913,15 +901,31 @@ void robot::resampleParticles()
         cumulative.push_back(sum);
     }
 
+    double variance = 0.0;
+
+    for(const auto &p : particles)
+    {
+        double dx = p.x - estimatedX;
+        double dy = p.y - estimatedY;
+
+        variance += dx*dx + dy*dy;
+    }
+
+    variance /= particles.size();
+
     double random_ratio;
 
-    if(sum < 0.3)
+    if(variance > 0.5)
     {
-        random_ratio = 0.05;
+        random_ratio = 0.08;
+    }
+    else if(variance > 0.2)
+    {
+        random_ratio = 0.03;
     }
     else
     {
-        random_ratio = 0.005;
+        random_ratio = 0.002;
     }
 
     for(int i = 0; i < particleCount; i++)

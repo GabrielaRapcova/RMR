@@ -107,26 +107,6 @@ void MapWidget::paintEvent(QPaintEvent *)
 
         painter.drawEllipse(QPoint(px, py), 2, 2);
     }
-
-    painter.setPen(Qt::green);
-    painter.setBrush(Qt::green);
-
-    int ex_grid =
-        static_cast<int>(estimatedX / resolution) +
-        static_cast<int>(gridData.size()) / 2;
-
-    int ey_grid =
-        static_cast<int>(estimatedY / resolution) +
-        static_cast<int>(gridData[0].size()) / 2;
-
-    if(ex_grid >= 0 && ex_grid < static_cast<int>(gridData.size()) &&
-        ey_grid >= 0 && ey_grid < static_cast<int>(gridData[0].size()))
-    {
-        int ex = ex_grid * cellSize;
-        int ey = ey_grid * cellSize;
-
-        painter.drawEllipse(QPoint(ex, ey), 5, 5);
-    }
 }
 
 void MapWidget::setDistanceField(
