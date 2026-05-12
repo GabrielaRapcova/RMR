@@ -30,7 +30,6 @@ void MapWidget::setEstimatedPose(
 }
 void MapWidget::paintEvent(QPaintEvent *)
 {
-    // Check both are not empty
     if(distanceField.empty() || gridData.empty() || gridData[0].empty())
         return;
 
@@ -79,13 +78,21 @@ void MapWidget::paintEvent(QPaintEvent *)
     painter.setPen(Qt::red);
     painter.setBrush(Qt::red);
 
+    double resolution = 0.05;
+
     for(const auto& p : particles)
     {
-        int px = (p.x / 0.05) + gridData.size()/2;
-        int py = (p.y / 0.05) + gridData[0].size()/2;
+        int grid_i = static_cast<int>(p.x / resolution) + static_cast<int>(gridData.size()) / 2;
+        int grid_j = static_cast<int>(p.y / resolution) + static_cast<int>(gridData[0].size()) / 2;
 
-        px *= cellSize;
-        py *= cellSize;
+        if(grid_i < 0 || grid_i >= static_cast<int>(gridData.size()) ||
+            grid_j < 0 || grid_j >= static_cast<int>(gridData[0].size()))
+        {
+            continue;
+        }
+
+        int px = grid_i * cellSize;
+        int py = grid_j * cellSize;
 
         painter.drawEllipse(QPoint(px, py), 2, 2);
     }

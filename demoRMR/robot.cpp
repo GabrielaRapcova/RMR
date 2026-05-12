@@ -924,7 +924,7 @@ void robot::resampleParticles()
         cumulative.push_back(sum);
     }
 
-    double random_ratio = 0.1;
+    double random_ratio = 0.05;
 
     for(int i = 0; i < particleCount; i++)
     {
@@ -975,10 +975,10 @@ void robot::resampleParticles()
 
 void robot::measurementUpdate()
 {
-    // Add this check at the start
+
     if(distanceField.empty() || distanceField[0].empty())
     {
-        return;  // Can't do measurement update without distance field
+        return;
     }
 
     double weightSum = 0.0;
@@ -1011,16 +1011,19 @@ void robot::measurementUpdate()
             if(i < 0 || i >= gridWidth ||
                 j < 0 || j >= gridHeight)
             {
-                error += 5.0;
+                error += 25.0;
                 continue;
             }
 
             double dist = distanceField[i][j];
 
             error += dist * dist;
+
+            error += 0.05 * fabs(angle);
         }
 
-        p.weight = exp(-0.005 * error);
+        if(error > 1000) error = 1000;
+        p.weight = 1.0 / (1.0 + error);
 
         weightSum += p.weight;
     }
