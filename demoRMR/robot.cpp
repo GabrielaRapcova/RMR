@@ -213,6 +213,7 @@ int robot::processThisRobot(const TKobukiData &robotdata)
         double bestCost = 1e9;
         double chosenDeg = feasible.front();
 
+        //použíteľné
         for(double cand : feasible)
         {
             auto angleDiff = [](double a, double b)
@@ -322,8 +323,8 @@ int robot::processThisLidar(const std::vector<LaserData>& laserData)
         sectors[idx] += mi;
     }
 
-    double thresholdHigh = 40.0;
-    double thresholdLow  = 20.0;
+    double thresholdHigh = 100.0;
+    double thresholdLow  = 50.0;
 
     std::vector<int> previousBinary = binarySectors;
 
