@@ -77,14 +77,6 @@ robot::robot(QObject *parent) : QObject(parent)
     minDist = 0.23;
     maxDist = 3.0;
 
-    //navigacia
-    sectorCount = 36;
-    sectorWidthDeg = 360.0 / sectorCount;
-    sectors.resize(sectorCount, 0);
-    obstacleMaxDist = 1.5;
-    bestDirectionDeg = 0.0;
-    mappingEnabled = true;
-
     //monte carlo
     localizationEnabled = false;
 
@@ -828,10 +820,9 @@ robot::Position robot::interpolatePosition(uint32_t time)
 /// vola sa ked dojdu nove data z lidaru
 int robot::processThisLidar(const std::vector<LaserData>& laserData)
 {
-
     copyOfLaserData = laserData;
 
-
+    std::vector<int> previousBinary = binarySectors;
 
     sectors.assign(sectorCount, 0.0);
     binarySectors.assign(sectorCount, 0);
@@ -841,139 +832,142 @@ int robot::processThisLidar(const std::vector<LaserData>& laserData)
     candidateDirections.clear();
 
 
-    for(const auto& point : laserData) {
+    for(const auto& point : laserData)
+    {
+
         double distance = point.scanDistance;
+        double angleDeg = -point.scanAngle;
 
-        if(distance <= 0 || distance > obstacleMaxDist) {
+        if(distance <= 0.0 || distance > obstacleMaxDist)
             continue;
-        }
 
-        double angleDeg = point.scanAngle;
-
-
-        while(angleDeg < -180.0) {
-            angleDeg += 360.0;
-        }
-
-        while(angleDeg >= 180.0) {
+        while(angleDeg >= 180.0)
             angleDeg -= 360.0;
-        }
 
-        int sectorIndex = static_cast<int>((angleDeg + 180.0) / sectorWidthDeg);
+        while(angleDeg < -180.0)
+            angleDeg += 360.0;
 
-        if(sectorIndex < 0 || sectorIndex >= sectorCount) {
-            continue;
-        }
+        int idx = static_cast<int>((angleDeg + 180.0) / sectorWidthDeg);
+        idx = std::max(0, std::min(sectorCount - 1, idx));
 
+        double a = obstacleMaxDist;
+        double b = 1.0;
+        double c = 1.0;
 
-        double magnitude = obstacleMaxDist - distance;
+        double mi = c * c * (a - b * distance);
 
-        if(magnitude > sectors[sectorIndex]) {
-            sectors[sectorIndex] = magnitude;
-        }
+        if(mi < 0.0)
+            mi = 0.0;
+
+        sectors[idx] += mi;
     }
 
+    double thresholdHigh = 40.0;
+    double thresholdLow  = 20.0;
 
-    double threshold = obstacleMaxDist * 0.35;
-
-    for(int i = 0; i < sectorCount; i++) {
-        if(sectors[i] > threshold) {
+    for(int i = 0; i < sectorCount; i++)
+    {
+        if(sectors[i] > thresholdHigh)
+        {
             binarySectors[i] = 1;
         }
-        else {
+        else if(sectors[i] < thresholdLow)
+        {
             binarySectors[i] = 0;
+        }
+        else
+        {
+            if(i < static_cast<int>(previousBinary.size()))
+                binarySectors[i] = previousBinary[i];
+            else
+                binarySectors[i] = 0;
         }
     }
 
-    maskedSectors = binarySectors;
+    for(int i = 0; i < sectorCount; i++)
+    {
+        if(binarySectors[i] == 1)
+        {
+            double approxDist = obstacleMaxDist - sectors[i];
+            approxDist = std::max(approxDist, 1.0);
 
-    double safetyDistance = robotRadius + safetyMargin;
-    double safetyDistanceMm = safetyDistance * 1000.0;
+            double effectiveRadius = robotRadius + safetyMargin;
+            double ratio = effectiveRadius / approxDist;
 
-    int maskWidth = 1;
+            ratio = std::min(1.0, ratio);
 
+            double angleExpandRad = asin(ratio);
+            double angleExpandDeg = angleExpandRad * 180.0 / M_PI;
 
-    if(safetyDistanceMm > 150.0) {
-        maskWidth = 2;
-    }
+            int expand = std::max(2, static_cast<int>(angleExpandDeg / sectorWidthDeg));
 
-    for(int i = 0; i < sectorCount; i++) {
-        if(binarySectors[i] == 1) {
-            for(int offset = -maskWidth; offset <= maskWidth; offset++) {
-                int idx = i + offset;
+            for(int j = -expand; j <= expand; j++)
+            {
+                int idx = i + j;
 
-                if(idx < 0) {
+                while(idx < 0)
                     idx += sectorCount;
-                }
 
-                if(idx >= sectorCount) {
+                while(idx >= sectorCount)
                     idx -= sectorCount;
-                }
 
                 maskedSectors[idx] = 1;
             }
         }
     }
 
-
     bool inGap = false;
-    int gapStart = 0;
+    int start = 0;
 
-    for(int i = 0; i < sectorCount; i++) {
-        if(maskedSectors[i] == 0 && !inGap) {
+    for(int i = 0; i < sectorCount; i++)
+    {
+        if(maskedSectors[i] == 0 && !inGap)
+        {
             inGap = true;
-            gapStart = i;
+            start = i;
         }
-
-        if((maskedSectors[i] == 1 || i == sectorCount - 1) && inGap) {
-            int gapEnd;
-
-            if(maskedSectors[i] == 1) {
-                gapEnd = i - 1;
-            }
-            else {
-                gapEnd = i;
-            }
-
-            if(gapEnd >= gapStart) {
-                freeGaps.push_back(std::make_pair(gapStart, gapEnd));
-            }
-
+        else if(maskedSectors[i] == 1 && inGap)
+        {
             inGap = false;
+            freeGaps.push_back({start, i - 1});
         }
     }
 
-
-    for(const auto& gap : freeGaps) {
-        int start = gap.first;
-        int end = gap.second;
-
-        int middle = (start + end) / 2;
-
-        double directionDeg = -180.0 + (middle + 0.5) * sectorWidthDeg;
-
-        candidateDirections.push_back(directionDeg);
+    if(inGap)
+    {
+        freeGaps.push_back({start, sectorCount - 1});
     }
 
+    int wideThreshold = 8;
 
-    if(candidateDirections.empty()) {
-        for(int i = 0; i < sectorCount; i++) {
-            if(maskedSectors[i] == 0) {
-                double directionDeg = -180.0 + (i + 0.5) * sectorWidthDeg;
-                candidateDirections.push_back(directionDeg);
-                break;
-            }
+    for(auto& g : freeGaps)
+    {
+        int width = g.second - g.first + 1;
+
+        if(width < wideThreshold)
+        {
+            int mid = (g.first + g.second) / 2;
+            candidateDirections.push_back(mid * sectorWidthDeg - 180.0);
+        }
+        else
+        {
+            int left = g.first + static_cast<int>(width * 0.25);
+            int right = g.second - static_cast<int>(width * 0.25);
+
+            candidateDirections.push_back(left * sectorWidthDeg - 180.0);
+            candidateDirections.push_back(right * sectorWidthDeg - 180.0);
         }
     }
-
 
     lidarReady = true;
+
     int robot_i = static_cast<int>(x / resolution) + gridWidth / 2;
     int robot_j = static_cast<int>(y / resolution) + gridHeight / 2;
 
-    for(const auto& point : laserData) {
-
-        if(positionHistory.size() < 2) {
+    for(const auto& point : laserData)
+    {
+        if(positionHistory.size() < 2)
+        {
             continue;
         }
 
@@ -987,51 +981,46 @@ int robot::processThisLidar(const std::vector<LaserData>& laserData)
         double distance_m = distance / 1000.0;
         double angleRad = angleDeg * M_PI / 180.0;
 
-
         if(distance_m <= minDist ||
             distance_m > maxDist ||
-            (distance_m >= 0.6 && distance_m <= 0.7)) {
+            (distance_m >= 0.6 && distance_m <= 0.7))
+        {
             continue;
         }
-
 
         double x_glob = pos.x + distance_m * cos(pos.fi + angleRad);
         double y_glob = pos.y + distance_m * sin(pos.fi + angleRad);
 
-
         int i = static_cast<int>(x_glob / resolution) + gridWidth / 2;
         int j = static_cast<int>(y_glob / resolution) + gridHeight / 2;
 
-
-        if(mappingEnabled) {
+        if(mappingEnabled)
+        {
             if(i >= 0 && i < gridWidth &&
                 j >= 0 && j < gridHeight &&
                 robot_i >= 0 && robot_i < gridWidth &&
-                robot_j >= 0 && robot_j < gridHeight) {
-
-
+                robot_j >= 0 && robot_j < gridHeight)
+            {
                 drawLine(robot_i, robot_j, i, j);
-
 
                 tempGrid[i][j]++;
 
-
-                if(tempGrid[i][j] >= 25) {
+                if(tempGrid[i][j] >= 25)
+                {
                     grid[i][j] = 1;
                 }
             }
         }
     }
 
-
-    if(localizationEnabled) {
+    if(localizationEnabled)
+    {
         computeDistanceField();
         motionUpdate();
         measurementUpdate();
         resampleParticles();
         estimatePose();
     }
-
 
     emit publishLidar(copyOfLaserData);
 
