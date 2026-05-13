@@ -96,10 +96,6 @@ signals:
   void publishSkeleton(const skeleton &skeledata);
 #endif
 private:
-  std::vector<int> sectors;
-  int sectorCount;
-  double sectorWidthDeg;
-  double obstacleMaxDist;
 
   // odometry
   double x;
@@ -120,8 +116,8 @@ private:
   ///-----------------------------
   /// toto su rychlosti ktore sa nastavuju setSpeedVal a posielaju v
   /// processThisRobot
-  double forwardspeed;  // mm/s
-  double rotationspeed; // omega/s
+  double forwardSpeed;
+  double rotationSpeed;
 
   // grid for mapping
   std::vector<std::vector<int>> tempGrid;
@@ -137,10 +133,36 @@ private:
   int gridHeight;
   double resolution;
 
+  bool wallFollowing;
+  bool lidarReady;
+  int sectorCount;
+  double sectorWidthDeg;
+  double obstacleMaxDist;
+
+  double wallFollowDirection;
+  std::vector<double> lastDirections;
+  int memorySize = 5;
+  double currentObstacleDist;
+  double prevFi; // Stores global orientation (fi) from the previous robot telemetry update
+  std::vector<double> prevSectors;
+  std::vector<double> sectors;
+  std::vector<int> binarySectors;
+  std::vector<int> maskedSectors;
+  std::vector<std::pair<int, int>> freeGaps;
+  std::vector<double> candidateDirections;
+  double bestDirectionDeg;
+  double robotRadius;
+  double safetyMargin;
+
+  double prevX = 0, prevY = 0;
+  int stuckCounter = 0;
+
+
   double minDist;
   double maxDist;
   void drawLine(int x0,int y0, int x1,int y1);
   double normalizeAngle(double a) const;
+
 
   //planning
   double goal_X;
@@ -181,9 +203,7 @@ private:
   void estimatePose();
   /// toto su callbacky co sa sa volaju s novymi datami
   int processThisLidar(const std::vector<LaserData> &laserData);
-  std::vector<std::pair<int,int>> freeGaps;
-  std::vector<double> candidateDirections;
-  double bestDirectionDeg;
+
   int processThisRobot(const TKobukiData &robotdata);
 #ifndef DISABLE_OPENCV
   int processThisCamera(cv::Mat cameraData);

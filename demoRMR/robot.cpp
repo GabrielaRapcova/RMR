@@ -8,6 +8,7 @@
 
 robot::robot(QObject *parent) : QObject(parent)
 {
+
     x = 0.0;
     y = 0.0;
     fi = 0.0;
@@ -22,6 +23,18 @@ robot::robot(QObject *parent) : QObject(parent)
     rotateMode = false;
     gyroOffset = 0.0;
     gyroInitialized = false;
+    lidarReady = false;
+    sectorCount = 72;
+    sectorWidthDeg = 360.0 / sectorCount;
+    sectors.resize(sectorCount, 0.0);
+    binarySectors.resize(sectorCount, 0);
+    maskedSectors.resize(sectorCount, 0);
+    obstacleMaxDist = 700.0;
+    bestDirectionDeg = 0.0;
+    robotRadius = 0.12;
+    safetyMargin = 0.0;
+    wallFollowing = false;
+    wallFollowDirection = 0.0;
 
     //mapping
     resolution = 0.05;
@@ -98,8 +111,8 @@ robot::robot(QObject *parent) : QObject(parent)
 void robot::initAndStartRobot(std::string ipaddress)
 {
 
-    forwardspeed=0;
-    rotationspeed=0;
+    forwardSpeed=0;
+    rotationSpeed=0;
     ///setovanie veci na komunikaciu s robotom/lidarom/kamerou.. su tam adresa porty a callback.. laser ma ze sa da dat callback aj ako lambda.
     /// lambdy su super, setria miesto a ak su rozumnej dlzky,tak aj prehladnost... ak ste o nich nic nepoculi poradte sa s vasim doktorom alebo lekarnikom...
     robotCom.setLaserParameters([this](const std::vector<LaserData>& dat)->int{return processThisLidar(dat);},ipaddress);
@@ -134,13 +147,15 @@ void robot::setGoal(double X, double Y)
 
 void robot::setSpeedVal(double forw, double rots)
 {
-    forwardspeed=forw;
-    rotationspeed=rots;
+    forwardSpeed=forw;
+    rotationSpeed=rots;
     useDirectCommands=0;
 }
 
 void robot::setSpeed(double forw, double rots)
 {
+    v_actual = forw;
+    w_actual = rots;
     if(forw==0 && rots!=0)
         robotCom.setRotationSpeed(rots);
     else if(forw!=0 && rots==0)
@@ -324,8 +339,8 @@ const std::vector<std::vector<double>>& robot::getDistanceField() const
 /// vola sa vzdy ked dojdu nove data z robota. nemusite nic riesit, proste sa to stane
 int robot::processThisRobot(const TKobukiData &robotdata)
 {
-    if(datacounter == 0)
-    {
+
+    if(datacounter == 0) {
         prevEncoderLeft = robotdata.EncoderLeft;
         prevEncoderRight = robotdata.EncoderRight;
         gyroOffset = robotdata.GyroAngle;
@@ -333,8 +348,13 @@ int robot::processThisRobot(const TKobukiData &robotdata)
         return 0;
     }
 
+
     int deltaL = robotdata.EncoderLeft - prevEncoderLeft;
     int deltaR = robotdata.EncoderRight - prevEncoderRight;
+
+    prevEncoderLeft = robotdata.EncoderLeft;
+    prevEncoderRight = robotdata.EncoderRight;
+
 
     if(deltaL > 32768) deltaL -= 65536;
     if(deltaL < -32768) deltaL += 65536;
@@ -342,204 +362,232 @@ int robot::processThisRobot(const TKobukiData &robotdata)
     if(deltaR > 32768) deltaR -= 65536;
     if(deltaR < -32768) deltaR += 65536;
 
-    prevEncoderLeft = robotdata.EncoderLeft;
-    prevEncoderRight = robotdata.EncoderRight;
 
     double tickToMeter = 0.000085292090497737556558;
-    double wheelBase = 0.23;
 
     double dL = tickToMeter * deltaL;
     double dR = tickToMeter * deltaR;
 
-    fi = ((robotdata.GyroAngle - gyroOffset) / 100.0) * M_PI / 180.0;
-
     double dS = (dR + dL) / 2.0;
+
+    fi = ((robotdata.GyroAngle - gyroOffset) / 100.0) * M_PI / 180.0;
+    fi = normalizeAngle(fi);
+
     x += dS * cos(fi);
     y += dS * sin(fi);
 
-
-    if(datacounter % 5 == 0)
-    {
+    if(datacounter % 5 == 0) {
         emit publishPosition(x, y, fi);
     }
 
-    if(hasTarget)
-    {
+
+    if(followingPath && currentMainPoint < static_cast<int>(mainpoints.size())) {
+        int gx = mainpoints[currentMainPoint].i;
+        int gy = mainpoints[currentMainPoint].j;
+
+        double wx = (gx - gridWidth / 2) * resolution;
+        double wy = (gy - gridHeight / 2) * resolution;
+
+        targetX = wx;
+        targetY = wy;
+        hasTarget = true;
+    }
+
+
+    if(hasTarget) {
         double dx = targetX - x;
         double dy = targetY - y;
+        double distance = sqrt(dx * dx + dy * dy);
 
-        double distance = sqrt(dx*dx + dy*dy);
-        double targetAngle = atan2(dy, dx);
-        double angleError = targetAngle - fi;
+        double goalAngle = atan2(dy, dx);
+        double goalRelative = goalAngle - fi;
+        goalRelative = normalizeAngle(goalRelative);
 
-        if(angleError > M_PI)  angleError -= 2.0 * M_PI;
-        if(angleError < -M_PI) angleError += 2.0 * M_PI;
-
-        double v_target = 0.0;
-        double w_target = 0.0;
+        double goalDeg = goalRelative * 180.0 / M_PI;
 
 
-        if(distance < 0.01)
-        {
-            if (followingPath)
-            {
+        if(distance < 0.01) {
+            setSpeed(0, 0);
+
+
+            if(followingPath) {
                 currentMainPoint++;
 
-                if (currentMainPoint < mainpoints.size())
-                {
-                    Cell c = mainpoints[currentMainPoint];
+                if(currentMainPoint < static_cast<int>(mainpoints.size())) {
+                    int gx = mainpoints[currentMainPoint].i;
+                    int gy = mainpoints[currentMainPoint].j;
 
-                    if (!isInsideGrid(c.i, c.j)) {
-                        followingPath = false;
-                        return 0;
-                    }
-
-                    double wx = (c.i - gridWidth / 2 + 0.5) * resolution;
-                    double wy = (c.j - gridHeight / 2 + 0.5) * resolution;
+                    double wx = (gx - gridWidth / 2) * resolution;
+                    double wy = (gy - gridHeight / 2) * resolution;
 
                     setTarget(wx, wy);
-                    return 0;
                 }
-                else
-                {
+                else {
                     followingPath = false;
+                    hasTarget = false;
+                    wallFollowing = false;
+                    setSpeed(0, 0);
                 }
             }
-
-            hasTarget = false;
-            rotateMode = false;
-            v_target = 0.0;
-            w_target = 0.0;
-            v_actual = 0.0;
-            w_actual = 0.0;
+            else {
+                hasTarget = false;
+                wallFollowing = false;
+                setSpeed(0, 0);
+            }
         }
-        else
-        {
-            double enterRot = 0.20;
-            double exitRot  = 0.10;
+        else {
 
-            if(rotateMode)
-            {
-                if(fabs(angleError) < exitRot)
-                    rotateMode = false;
-            }
-            else
-            {
-                if(fabs(angleError) > enterRot)
-                    rotateMode = true;
-            }
+            if(!lidarReady || maskedSectors.empty()) {
+                double angleError = goalRelative;
 
-            if(rotateMode)
-            {
-
-                v_target = 0.0;
-                w_target = 0.8 * angleError;
-
-                if(w_target > 0.5)  w_target = 0.5;
-                if(w_target < -0.5) w_target = -0.5;
-            }
-            else
-            {
-
-                double v_max = 250.0;
-                double v_min = 20.0;
-                double slowDownDist = 0.2;
-
-                if(distance > slowDownDist)
-                {
-                    v_target = v_max;
+                if(fabs(angleError) > 0.6) {
+                    setSpeed(0, 0.9 * angleError);
                 }
-                else
-                {
-                    v_target = v_min + (v_max - v_min) * (distance / slowDownDist);
+                else if(fabs(angleError) > 0.25) {
+                    setSpeed(80, 0.8 * angleError);
+                }
+                else {
+                    setSpeed(150, 0.5 * angleError);
+                }
+            }
+            else {
+
+                auto angleToSector = [&](double angleDeg) {
+                    while(angleDeg < -180.0) angleDeg += 360.0;
+                    while(angleDeg >= 180.0) angleDeg -= 360.0;
+
+                    int idx = static_cast<int>((angleDeg + 180.0) / sectorWidthDeg);
+
+                    if(idx < 0) idx = 0;
+                    if(idx >= sectorCount) idx = sectorCount - 1;
+
+                    return idx;
+                };
+
+                int goalSector = angleToSector(goalDeg);
+
+
+                bool goalBlocked = false;
+
+                if(goalSector >= 0 &&
+                    goalSector < static_cast<int>(maskedSectors.size())) {
+                    goalBlocked = maskedSectors[goalSector] == 1;
                 }
 
-                if(v_target < v_min) v_target = v_min;
-                if(v_target > v_max) v_target = v_max;
+                double selectedDirectionDeg = goalDeg;
 
 
-                /*double angleScale = cos(angleError);
-                if(angleScale < 0.0) angleScale = 0.0;
-                v_target *= angleScale;*/
+                if(!goalBlocked) {
+                    selectedDirectionDeg = goalDeg;
+                    wallFollowing = false;
+                }
+                else {
+
+                    if(!candidateDirections.empty()) {
+                        double bestCost = 1e9;
+                        double bestCandidate = candidateDirections[0];
+
+                        for(double cand : candidateDirections) {
+                            int candSector = angleToSector(cand);
+
+                            if(candSector < 0 ||
+                                candSector >= static_cast<int>(maskedSectors.size()) ||
+                                maskedSectors[candSector] == 1) {
+                                continue;
+                            }
 
 
-                w_target = 0.8 * angleError;
-                if(w_target > 0.5)  w_target = 0.5;
-                if(w_target < -0.5) w_target = -0.5;
+                            double goalDiff = fabs(
+                                normalizeAngle((cand - goalDeg) * M_PI / 180.0)
+                                );
+
+                            double currentDiff = fabs(
+                                normalizeAngle((cand - bestDirectionDeg) * M_PI / 180.0)
+                                );
+
+                            double cost = 5.0 * goalDiff + 2.0 * currentDiff;
+
+                            if(wallFollowing) {
+                                double wallDiff = fabs(
+                                    normalizeAngle((cand - wallFollowDirection) * M_PI / 180.0)
+                                    );
+
+                                cost += 1.5 * wallDiff;
+                            }
+
+                            if(cost < bestCost) {
+                                bestCost = cost;
+                                bestCandidate = cand;
+                            }
+                        }
+
+                        selectedDirectionDeg = bestCandidate;
+                        wallFollowing = true;
+                        wallFollowDirection = selectedDirectionDeg;
+                    }
+                    else {
+
+                        selectedDirectionDeg = 90.0;
+                        wallFollowing = true;
+                        wallFollowDirection = selectedDirectionDeg;
+                    }
+                }
+
+                bestDirectionDeg = selectedDirectionDeg;
+
+
+                double selectedDirectionRad = selectedDirectionDeg * M_PI / 180.0;
+                double angleError = normalizeAngle(selectedDirectionRad);
+
+
+                if(fabs(angleError) > 0.6) {
+                    setSpeed(0, 0.9 * angleError);
+                }
+                else if(fabs(angleError) > 0.25) {
+                    setSpeed(80, 0.8 * angleError);
+                }
+                else {
+                    setSpeed(150, 0.5 * angleError);
+                }
             }
-        }
-
-        double acc_v = 8.0;
-        double acc_v2 = 15.0;
-        if(v_actual < v_target)
-        {
-            v_actual += acc_v;
-            if(v_actual > v_target) v_actual = v_target;
-        }
-        else if(v_actual > v_target)
-        {
-            v_actual -= acc_v2;
-            if(v_actual < v_target) v_actual = v_target;
-        }
-
-        double acc_w = 0.05;
-        if(w_actual < w_target)
-        {
-            w_actual += acc_w;
-            if(w_actual > w_target) w_actual = w_target;
-        }
-        else if(w_actual > w_target)
-        {
-            w_actual -= acc_w;
-            if(w_actual < w_target) w_actual = w_target;
-        }
-
-
-        if(!hasTarget ||( fabs(v_actual) < 0.01 && fabs(w_actual) < 0.01))
-        {
-            setSpeed(0, 0);
-        }
-        else
-        {
-            setSpeed(v_actual, w_actual);
         }
     }
 
-    if(useDirectCommands == 0)
-    {
-        if(forwardspeed == 0 && rotationspeed != 0)
-            robotCom.setRotationSpeed(rotationspeed);
-        else if(forwardspeed != 0 && rotationspeed == 0)
-            robotCom.setTranslationSpeed(forwardspeed);
-        else if((forwardspeed != 0 && rotationspeed != 0))
-            robotCom.setArcSpeed(forwardspeed, forwardspeed / rotationspeed);
-        else
+
+    if(useDirectCommands == 0) {
+        if(forwardSpeed != 0 && rotationSpeed != 0) {
+            robotCom.setArcSpeed(forwardSpeed, forwardSpeed / rotationSpeed);
+        }
+        else if(forwardSpeed != 0) {
+            robotCom.setTranslationSpeed(forwardSpeed);
+        }
+        else if(rotationSpeed != 0) {
+            robotCom.setRotationSpeed(rotationSpeed);
+        }
+        else {
             robotCom.setTranslationSpeed(0);
+        }
     }
+
 
     Position p;
-
     p.x = x;
     p.y = y;
     p.fi = fi;
     p.timestamp = robotdata.synctimestamp;
-
     positionHistory.push_back(p);
-    if(positionHistory.size() > 1000)
-    {
+
+    if(positionHistory.size() > 1000) {
         positionHistory.erase(positionHistory.begin());
     }
 
-    static int counter = 0;
 
-    counter++;
-
-    if(counter % 20 == 0)
-    {
+    if(datacounter % 20 == 0) {
         computeDistanceField();
     }
 
     datacounter++;
+
     return 0;
 }
 
@@ -781,63 +829,202 @@ robot::Position robot::interpolatePosition(uint32_t time)
 int robot::processThisLidar(const std::vector<LaserData>& laserData)
 {
 
-    copyOfLaserData=laserData;
+    copyOfLaserData = laserData;
 
-    //tu mozete robit s datami z lidaru.. napriklad najst prekazky, zapisat do mapy. naplanovat ako sa prekazke vyhnut.
-    // ale nic vypoctovo narocne - to iste vlakno ktore cita data z lidaru
-    // updateLaserPicture=1;
 
-    int robot_i = (x / resolution) + gridWidth / 2;
-    int robot_j = (y / resolution) + gridHeight / 2;
 
-    for (const auto& point : laserData)
-    {
-        if(positionHistory.size() < 2)
+    sectors.assign(sectorCount, 0.0);
+    binarySectors.assign(sectorCount, 0);
+    maskedSectors.assign(sectorCount, 0);
+
+    freeGaps.clear();
+    candidateDirections.clear();
+
+
+    for(const auto& point : laserData) {
+        double distance = point.scanDistance;
+
+        if(distance <= 0 || distance > obstacleMaxDist) {
             continue;
+        }
+
+        double angleDeg = point.scanAngle;
+
+
+        while(angleDeg < -180.0) {
+            angleDeg += 360.0;
+        }
+
+        while(angleDeg >= 180.0) {
+            angleDeg -= 360.0;
+        }
+
+        int sectorIndex = static_cast<int>((angleDeg + 180.0) / sectorWidthDeg);
+
+        if(sectorIndex < 0 || sectorIndex >= sectorCount) {
+            continue;
+        }
+
+
+        double magnitude = obstacleMaxDist - distance;
+
+        if(magnitude > sectors[sectorIndex]) {
+            sectors[sectorIndex] = magnitude;
+        }
+    }
+
+
+    double threshold = obstacleMaxDist * 0.35;
+
+    for(int i = 0; i < sectorCount; i++) {
+        if(sectors[i] > threshold) {
+            binarySectors[i] = 1;
+        }
+        else {
+            binarySectors[i] = 0;
+        }
+    }
+
+    maskedSectors = binarySectors;
+
+    double safetyDistance = robotRadius + safetyMargin;
+    double safetyDistanceMm = safetyDistance * 1000.0;
+
+    int maskWidth = 1;
+
+
+    if(safetyDistanceMm > 150.0) {
+        maskWidth = 2;
+    }
+
+    for(int i = 0; i < sectorCount; i++) {
+        if(binarySectors[i] == 1) {
+            for(int offset = -maskWidth; offset <= maskWidth; offset++) {
+                int idx = i + offset;
+
+                if(idx < 0) {
+                    idx += sectorCount;
+                }
+
+                if(idx >= sectorCount) {
+                    idx -= sectorCount;
+                }
+
+                maskedSectors[idx] = 1;
+            }
+        }
+    }
+
+
+    bool inGap = false;
+    int gapStart = 0;
+
+    for(int i = 0; i < sectorCount; i++) {
+        if(maskedSectors[i] == 0 && !inGap) {
+            inGap = true;
+            gapStart = i;
+        }
+
+        if((maskedSectors[i] == 1 || i == sectorCount - 1) && inGap) {
+            int gapEnd;
+
+            if(maskedSectors[i] == 1) {
+                gapEnd = i - 1;
+            }
+            else {
+                gapEnd = i;
+            }
+
+            if(gapEnd >= gapStart) {
+                freeGaps.push_back(std::make_pair(gapStart, gapEnd));
+            }
+
+            inGap = false;
+        }
+    }
+
+
+    for(const auto& gap : freeGaps) {
+        int start = gap.first;
+        int end = gap.second;
+
+        int middle = (start + end) / 2;
+
+        double directionDeg = -180.0 + (middle + 0.5) * sectorWidthDeg;
+
+        candidateDirections.push_back(directionDeg);
+    }
+
+
+    if(candidateDirections.empty()) {
+        for(int i = 0; i < sectorCount; i++) {
+            if(maskedSectors[i] == 0) {
+                double directionDeg = -180.0 + (i + 0.5) * sectorWidthDeg;
+                candidateDirections.push_back(directionDeg);
+                break;
+            }
+        }
+    }
+
+
+    lidarReady = true;
+    int robot_i = static_cast<int>(x / resolution) + gridWidth / 2;
+    int robot_j = static_cast<int>(y / resolution) + gridHeight / 2;
+
+    for(const auto& point : laserData) {
+
+        if(positionHistory.size() < 2) {
+            continue;
+        }
+
         Position pos = interpolatePosition(point.timestamp);
 
         double angleDeg = point.scanAngle;
         double distance = point.scanDistance;
+
         angleDeg = -angleDeg;
 
         double distance_m = distance / 1000.0;
         double angleRad = angleDeg * M_PI / 180.0;
 
-        if (distance_m <= minDist || distance_m > maxDist ||
-            (distance_m >= 0.6 && distance_m <= 0.7))
-        {
+
+        if(distance_m <= minDist ||
+            distance_m > maxDist ||
+            (distance_m >= 0.6 && distance_m <= 0.7)) {
             continue;
         }
+
 
         double x_glob = pos.x + distance_m * cos(pos.fi + angleRad);
         double y_glob = pos.y + distance_m * sin(pos.fi + angleRad);
 
-        int i = (x_glob / resolution) + gridWidth / 2;
-        int j = (y_glob / resolution) + gridHeight / 2;
 
-        if(mappingEnabled)
-        {
-            if(i >= 0 && i < gridWidth && j >= 0 && j < gridHeight)
-            {
+        int i = static_cast<int>(x_glob / resolution) + gridWidth / 2;
+        int j = static_cast<int>(y_glob / resolution) + gridHeight / 2;
+
+
+        if(mappingEnabled) {
+            if(i >= 0 && i < gridWidth &&
+                j >= 0 && j < gridHeight &&
+                robot_i >= 0 && robot_i < gridWidth &&
+                robot_j >= 0 && robot_j < gridHeight) {
+
+
                 drawLine(robot_i, robot_j, i, j);
+
 
                 tempGrid[i][j]++;
 
-                if(tempGrid[i][j] >= 25)
-                {
+
+                if(tempGrid[i][j] >= 25) {
                     grid[i][j] = 1;
                 }
             }
         }
-
-        while (angleDeg >= 180.0) angleDeg -= 360.0;
-        while (angleDeg < -180.0) angleDeg += 360.0;
-
     }
 
 
-    if(localizationEnabled)
-    {
+    if(localizationEnabled) {
         computeDistanceField();
         motionUpdate();
         measurementUpdate();
@@ -847,7 +1034,6 @@ int robot::processThisLidar(const std::vector<LaserData>& laserData)
 
 
     emit publishLidar(copyOfLaserData);
-    // update();//tento prikaz prinuti prekreslit obrazovku.. zavola sa paintEvent funkcia
 
     return 0;
 }
