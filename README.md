@@ -58,7 +58,7 @@ Miesto dopadu laserového lúča sa označí ako prekážka. Priestor medzi robo
 - prekážka musí byť potvrdená viacerými meraniami,
 - nesprávne detekované prekážky sa môžu postupne odstrániť.
 
-- # 4.úloha: Plánovanie dráhy
+# 4.úloha: Plánovanie dráhy
 
 Na plánovanie dráhy bol použitý algoritmus Flood Fill.
 ## Flood Fill algoritmus
