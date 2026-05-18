@@ -3,131 +3,56 @@
 # 1.úloha: Lokalizácia a polohovanie robota v prostredí
 
 ## Lokalizácia
-Na lokalizáciu robota bola použitá gyroodometria, teda kombinácia:
-- odometrie z enkóderov kolies,
-- údajov z gyroskopu.
+Pri lokalizácii robota sme využili gyroodometriu, teda kombináciu údajov z enkóderov kolies a gyroskopu robota Kobuki. V callback funkcii processThisRobot() sa z rozdielu hodnôt enkóderov vypočítala prejdená vzdialenosť ľavého a pravého kolesa. Následne sa pomocou gyroskopu určilo aktuálne natočenie robota fi. Poloha robota sa potom aktualizovala podľa vzťahov zadaných v prezentácií k úlohe.
 
-Robot priebežne vypočítava:
-- polohu v osi X,
-- polohu v osi Y,
-- orientáciu robota.
+Gyroskop bol použitý na spresnenie orientácie robota, čím sa znížila chyba klasickej odometrie spôsobená prešmykom kolies. Pri polohovaní robota sme implementovali jednoduchý regulátor rozdelený na:
+  - rotáciu robota na požadovaný smer,
+  - následný pohyb dopredu.
 
-Gyroskop slúži na spresnenie orientácie a znižuje chybu spôsobenú prešmykovaním kolies. Pri spracovaní LiDAR dát sa navyše používa interpolácia pozície podľa časových značiek meraní, aby boli laserové dáta priradené správnej polohe robota.
-
-## Polohovanie
-Úlohou polohovania je dostať robota do zadaných súradníc.
-Riadenie pohybu je rozdelené na:
-- rotáciu na mieste,
-- transláciu smerom k cieľu.
-
-Robot:
-1. najprv vypočíta smer k cieľu,
-2. otočí sa správnym smerom,
-3. následne sa pohybuje dopredu.
-
-Na reguláciu bol použitý proporcionálny regulátor:
-- uhlová rýchlosť závisí od chyby natočenia,
-- lineárna rýchlosť závisí od vzdialenosti od cieľa.
-
-Pri približovaní ku cieľu sa rýchlosť automaticky znižuje, aby robot nepredbehol cieľ.
-Implementované bolo aj:
-- obmedzenie maximálnej rýchlosti,
-- plynulé zrýchľovanie a spomaľovanie,
-- hysterézne prepínanie medzi rotáciou a transláciou.
+Robot najprv vypočíta uhlovú chybu medzi aktuálnym smerom a cieľovým bodom. Ak chyba presahuje zadaný threshold, aktivuje sa režim rotácie (rotateMode) a robot sa otáča na mieste. Po zarovnaní smeru začne translácia smerom k cieľu. Rýchlosť pohybu sa znižuje postupne  približovaním k cieľu, aby robot nezastavil prudko. Uhlová rýchlosť je riadená proporcionálne podľa chyby uhla.
 
 # 3.úloha: Mapovanie
 
-Na mapovanie prostredia bola použitá occupancy grid mapa. Prostredie je rozdelené na malé bunky, pričom každá bunka obsahuje informáciu:
-- voľný priestor,
-- prekážka,
-- neznáme miesto.
+Mapovanie bolo realizované pomocou mriežky obsadenia (occupancy grid). Prostredie bolo rozdelené na štvorcovú mriežku s rozlíšením 0.05 m na bunku. Každá bunka obsahuje informáciu, či je voľná alebo obsadená prekážkou.
 
-## Spracovanie LiDAR dát
-LiDAR poskytuje vzdialenosti prekážok v rôznych smeroch okolo robota.
-Každé meranie je:
-1. prevedené zo súradnicového systému LiDARu,
-2. transformované do globálneho súradnicového systému mapy.
+Dáta z lidaru sa spracovávajú vo funkcii processThisLidar(). Každý laserový bod sa transformuje zo súradnicového systému robota do globálnych súradníc pomocou:
 
-Transformácia využíva:
-- aktuálnu pozíciu robota,
-- orientáciu robota,
-- vzdialenosť a uhol merania.
+aktuálnej polohy robota,
+uhla natočenia robota,
+vzdialenosti a uhla merania lidaru.
 
-## Aktualizácia mapy
-Miesto dopadu laserového lúča sa označí ako prekážka. Priestor medzi robotom a prekážkou sa označuje ako voľný pomocou Bresenhamovho algoritmu. Na odstránenie šumu:
-- prekážka musí byť potvrdená viacerými meraniami,
-- nesprávne detekované prekážky sa môžu postupne odstrániť.
+Transformované body sa následne zapisujú do mapy ako prekážky. Na vykreslenie voľného priestoru medzi robotom a prekážkou sme použili Bresenhamov algoritmus (drawLine()), ktorý označuje bunky medzi robotom a nameraným bodom ako voľné. Ak sa určitá bunka opakovane potvrdí meraniami, označí sa ako obsadená. Mapa sa dá uložiť do súboru pomocou saveMap() a načítať späť cez loadMap().
 
 # 4.úloha: Plánovanie dráhy
 
-Na plánovanie dráhy bol použitý algoritmus Flood Fill.
-## Flood Fill algoritmus
-Algoritmus začína od cieľovej bunky:
-1. cieľ dostane hodnotu 2,
-2. susedné bunky dostanú hodnotu 3,
-3. ďalšie bunky pokračujú rastúcimi hodnotami.
+Na plánovanie dráhy sme použili flood fill algoritmus. Pred samotným plánovaním sa najprv zväčšia prekážky pomocou funkcie inflateObstacles(), aby robot plánoval bezpečnú trasu s určitou rezervou od stien. Polomer inflácie bol zvolený podľa rozmerov robota.
 
-Takto vznikne mapa vzdialeností od cieľa. Robot následne:
-- začína od svojej aktuálnej polohy,
-- vždy vyberá susednú bunku s najnižšou hodnotou,
-- až kým nedosiahne cieľ.
+Vo funkcii floodFill():
 
-Použitá bola 8-susednosť, ktorá umožňuje:
-- diagonálny pohyb,
-- kratšie trajektórie,
-- prirodzenejší pohyb robota.
+1. cieľová bunka dostane hodnotu 2,
+2. susedné bunky dostávajú postupne vyššie hodnoty,
+3. algoritmus pokračuje pomocou BFS (fronty), až kým neohodnotí celý dostupný priestor.
 
-## Inflácia prekážok
-Pred plánovaním sa realizuje inflácia prekážok. Keďže robot má nenulové rozmery, prekážky sa zväčšujú o bezpečnostnú vzdialenosť, aby:
-- robot nenarazil do steny,
-- trajektória neviedla príliš blízko prekážok.
+Následne sa vo funkcii extractPath() vytvorí výsledná trajektória. Robot začína v štartovacej bunke a vždy sa presunie do susednej bunky s najnižšou hodnotou, až kým nepríde do cieľa.
 
-## Generovanie trajektórie
-Výsledná trajektória obsahuje množstvo bodov. Pre efektívnejší pohyb sa extrahujú iba hlavné body:
-- zmena smeru,
-- začiatok trajektórie,
-- koniec trajektórie.
-Robot sa následne pohybuje medzi týmito bodmi pomocou regulácie pohybu.
-
----
+Kvôli jednoduchšiemu riadeniu robota sa cesta následne zredukovala iba na hlavné body zmeny smeru (mainpoints). Robot potom postupne naviguje medzi týmito bodmi pomocou implementovaného polohovania.
 
 # 5.úloha: Pravdepodobnostná lokalizácia v známej mape
 
-Na lokalizáciu v známej mape bol implementovaný algoritmus Monte Carlo Localization (MCL). MCL využíva množinu particles, pričom každá particle reprezentuje možnú polohu robota.
+Pravdepodobnostná lokalizácia bola implementovaná pomocou Monte Carlo Localization (MCL). Robot využíva množinu častíc (particles), kde každá častica predstavuje možný stav robota (x, y, fi) s určitou váhou pravdepodobnosti.
 
-## Inicializácia particles
-Na začiatku sa vytvorí množstvo particles:
-- rozmiestnených okolo aktuálnej odometrickej polohy,
-- s náhodným šumom,
-- s počiatočnými pravdepodobnosťami.
+Inicializácia častíc prebieha vo funkcii initializeParticles(), kde sa častice rozmiestnia okolo aktuálnej polohy robota s náhodným šumom.
 
-## Pohybový model
-Particles sa pohybujú podľa:
-- odometrie robota,
-- náhodného šumu.
+Algoritmus pozostáva zo štyroch krokov:
 
-Šum simuluje:
-- nepresnosti pohybu,
-- prešmykovanie kolies,
-- chyby senzorov.
-Každá particle je vyhodnotená podľa zhody LiDAR meraní s mapou. Používa sa distance field:
-- každá bunka obsahuje vzdialenosť od najbližšej prekážky.
+1. Motion update
+Vo funkcii motionUpdate() sa každá častica posunie podľa odometrie robota. Pohyb je doplnený o náhodný šum pomocou normálneho rozdelenia (sampleNormal()), čím sa simuluje nepresnosť pohybu.
 
-Particles, ktorých merania lepšie zodpovedajú mape:
-- získajú vyššiu váhu,
-- majú väčšiu pravdepodobnosť prežitia.
+2. Measurement update
+Vo funkcii measurementUpdate() sa porovnávajú lidarové merania s mapou prostredia. Na tento účel sa vytvorilo distance field (computeDistanceField()), ktoré pre každú bunku obsahuje vzdialenosť od najbližšej prekážky. Častice, ktorých predikované merania lepšie zodpovedajú mape, získajú vyššiu váhu.
 
-## Prevzorkovanie
-Po vyhodnotení sa realizuje prevzorkovanie pomocou ruletového výberu. Particles s vyššou váhou:
-- zostávajú zachované,
-- menej presné particles zanikajú.
+3. Resampling
+Funkcia resampleParticles() realizuje ruletový výber častíc podľa ich váh. Pravdepodobnejšie častice majú väčšiu šancu zostať zachované. Súčasne sa malé percento častíc generuje náhodne, aby sa zabránilo uviaznutiu algoritmu v nesprávnom riešení.
 
-Malé množstvo nových náhodných particles sa generuje pre:
-- zachovanie diverzity,
-- schopnosť zotavenia po strate lokalizácie.
-- 
-## Výpočet výslednej polohy
-Výsledná poloha robota sa vypočíta ako vážený priemer všetkých particles:
-- priemer X,
-- priemer Y,
-- priemer orientácie.
+4. Odhad polohy
+Vo funkcii estimatePose() sa výsledná poloha robota vypočíta ako vážený priemer všetkých častíc. Orientácia sa počíta pomocou priemerovania sínusov a kosínusov uhlov.
