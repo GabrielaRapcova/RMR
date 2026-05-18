@@ -11,6 +11,32 @@ Gyroskop bol použitý na spresnenie orientácie robota, čím sa znížila chyb
 
 Robot najprv vypočíta uhlovú chybu medzi aktuálnym smerom a cieľovým bodom. Ak chyba presahuje zadaný threshold, aktivuje sa režim rotácie (rotateMode) a robot sa otáča na mieste. Po zarovnaní smeru začne translácia smerom k cieľu. Rýchlosť pohybu sa znižuje postupne  približovaním k cieľu, aby robot nezastavil prudko. Uhlová rýchlosť je riadená proporcionálne podľa chyby uhla.
 
+# 2.úloha: Navigácia
+Navigácia robota bola implementovaná na princípe algoritmu VFH+ (Vector Field Histogram Plus). Okolie robota sme rozdelili na 72 sektorov. Do jednotlivých sektorov sa na základe dát z lidaru zapisovala „obsadenosť“ prekážkami. Čím bližšia bola prekážka, tým väčšiu hodnotu sektor získal.
+
+Následne sa vytvoril binárny polárny histogram:
+
+  - sektory s vysokou hodnotou boli označené ako obsadené,
+  - sektory s nízkou hodnotou boli označené ako voľné.
+
+Po vytvorení histogramu sa aplikovalo maskovanie sektorov. Obsadené sektory sa rozšírili o bezpečnostnú rezervu podľa veľkosti robota (robotRadius) a bezpečnostného odstupu (safetyMargin).
+
+Zo vzniknutých voľných medzier (freeGaps) sa následne generovali kandidátske smery pohybu:
+
+  - pri úzkych medzerách sa vybral stred medzery,
+  - pri širokých medzerách sa vyberali dva smery bližšie k okrajom medzery (25%)
+
+Každý kandidátsky smer bol následne ohodnotený nákladovou funkciou. Pri výbere smeru sa minimalizovali:
+
+  - odchýlka od smeru k cieľu,
+  - odchýlka od aktuálneho smeru robota,
+  - zmena oproti predchádzajúcemu smeru,
+  - blízkosť prekážok.
+
+Ak bol priamy smer k cieľu zablokovaný, robot prešiel do režimu sledovania steny (wallFollowing), v ktorom sa snažil obísť prekážku (zmena hodnôt na minimalizovanie) a následne sa vrátiť späť k cieľu.
+
+Výsledný smer sa následne previedol na lineárnu a uhlovú rýchlosť robota. Pri veľkej uhlovej chybe sa robot otáčal na mieste, pri menšej chybe sa pohyboval dopredu so súčasnou korekciou smeru.
+
 # 3.úloha: Mapovanie
 
 Mapovanie bolo realizované pomocou mriežky obsadenia (occupancy grid). Prostredie bolo rozdelené na štvorcovú mriežku s rozlíšením 0.05 m na bunku. Každá bunka obsahuje informáciu, či je voľná alebo obsadená prekážkou.
