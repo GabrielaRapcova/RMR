@@ -45,14 +45,10 @@ Inicializácia častíc prebieha vo funkcii initializeParticles(), kde sa časti
 
 Algoritmus pozostáva zo štyroch krokov:
 
-1. Motion update
-Vo funkcii motionUpdate() sa každá častica posunie podľa odometrie robota. Pohyb je doplnený o náhodný šum pomocou normálneho rozdelenia (sampleNormal()), čím sa simuluje nepresnosť pohybu.
+1. Motion update: Vo funkcii motionUpdate() sa každá častica posunie podľa odometrie robota. Pohyb je doplnený o náhodný šum pomocou normálneho rozdelenia (sampleNormal()), čím sa simuluje nepresnosť pohybu.
 
-2. Measurement update
-Vo funkcii measurementUpdate() sa porovnávajú lidarové merania s mapou prostredia. Na tento účel sa vytvorilo distance field (computeDistanceField()), ktoré pre každú bunku obsahuje vzdialenosť od najbližšej prekážky. Častice, ktorých predikované merania lepšie zodpovedajú mape, získajú vyššiu váhu.
+2. Measurement update: Vo funkcii measurementUpdate() sa porovnávajú lidarové merania s mapou prostredia. Na tento účel sa vytvorilo distance field (computeDistanceField()), ktoré pre každú bunku obsahuje vzdialenosť od najbližšej prekážky. Častice, ktorých predikované merania lepšie zodpovedajú mape, získajú vyššiu váhu.
 
-3. Resampling
-Funkcia resampleParticles() realizuje ruletový výber častíc podľa ich váh. Pravdepodobnejšie častice majú väčšiu šancu zostať zachované. Súčasne sa malé percento častíc generuje náhodne, aby sa zabránilo uviaznutiu algoritmu v nesprávnom riešení.
+3. Resampling: Funkcia resampleParticles() realizuje ruletový výber častíc podľa ich váh. Pravdepodobnejšie častice majú väčšiu šancu zostať zachované. Súčasne sa malé percento častíc generuje náhodne, aby sa zabránilo uviaznutiu algoritmu v nesprávnom riešení.
 
-4. Odhad polohy
-Vo funkcii estimatePose() sa výsledná poloha robota vypočíta ako vážený priemer všetkých častíc. Orientácia sa počíta pomocou priemerovania sínusov a kosínusov uhlov.
+4. Odhad polohy: Vo funkcii estimatePose() sa výsledná poloha robota vypočíta ako vážený priemer všetkých častíc. Orientácia sa počíta pomocou priemerovania sínusov a kosínusov uhlov.
